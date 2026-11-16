@@ -1,0 +1,30 @@
+import Phaser from 'phaser';
+import { generateTextures } from '../gfx/textures.js';
+import { LEVELS } from '../data/levels.js';
+
+/**
+ * Genera todas las texturas y animaciones. Si en el futuro usas sprites reales,
+ * cárgalos en preload() con la misma clave y generateTextures() respetará los que ya existan.
+ */
+export default class BootScene extends Phaser.Scene {
+  constructor() {
+    super('Boot');
+  }
+
+  create() {
+    generateTextures(this);
+    this.scene.launch('Transition');
+
+    const anim = (key, texture, frames, frameRate) =>
+      this.anims.create({ key, frames: this.anims.generateFrameNumbers(texture, { frames }), frameRate, repeat: -1 });
+    anim('flag-wave', 'flag', [0, 1, 2, 3], 8);
+    anim('saw-spin', 'saw', [0, 1, 2, 3], 20);
+    anim('tuft-sway', 'tuft', [0, 1], 2);
+    for (let i = 0; i < 3; i++) anim(`flower${i}-sway`, `flower${i}`, [0, 1], 2);
+
+    // Atajo de desarrollo: ?level=5 entra directamente a ese nivel
+    const lvl = parseInt(new URLSearchParams(window.location.search).get('level'), 10);
+    if (lvl >= 1 && lvl <= LEVELS.length) this.scene.start('Game', { levelIndex: lvl - 1 });
+    else this.scene.start('Menu');
+  }
+}
