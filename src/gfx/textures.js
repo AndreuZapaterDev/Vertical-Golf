@@ -326,7 +326,141 @@ export function generateTextures(scene) {
     bitmap(c, 0, 0, ['.ooooo.', 'ocwcbco', 'occccco', '.oosoo.', '...s...', '...s...', '..ooo..'], { o: '#1d2a5a', c: '#7fe3f5', w: '#ffffff', b: '#4ab8ea', s: '#e8e0f0' }),
   );
 
+  generateSky(scene);
   generateUi(scene);
+}
+
+// ------------------------------------------------------------------ cielo y fondo lejano
+
+/** Mezcla dos colores '#rrggbb' (k=0 → a, k=1 → b) */
+function mix(a, b, k) {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (s) => Math.round(((pa >> s) & 255) * (1 - k) + ((pb >> s) & 255) * k);
+  return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
+}
+
+function generateSky(scene) {
+  // Colinas lejanas (dos capas por mundo) para el parallax del inicio de cada hoyo
+  for (const [k, T] of Object.entries(THEMES)) {
+    const darkness = T.hillsDark || [0.14, 0.26];
+    [[darkness[0], 0.9, 1.3, 3], [darkness[1], 1.7, 0.7, 11]].forEach(([dark, f1, f2, seed], layer) => {
+      const w = 240;
+      const h = 80;
+      // la pradera tiene colinas verdes; de noche, siluetas oscuras para que no parezcan dibujos de línea
+      const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : T.bgB;
+      const body = mix(base, T.outline, dark);
+      const rim = T.sky === 'night' ? mix(T.bgA, T.outline, 0.1) : mix(base, '#ffffff', 0.3);
+      make(scene, `hills-${k}-${layer}`, w, h, (c) => {
+        for (let x = 0; x < w; x++) {
+          const a = (x / w) * Math.PI * 2;
+          const top = Math.round(
+            h * (layer ? 0.42 : 0.3) + Math.sin(a * f1 * 2 + seed) * 12 + Math.sin(a * f2 * 5 + seed * 2) * 6 + Math.sin(a * 11 + seed) * 1.5,
+          );
+          rect(c, x, top, 1, h - top, body);
+          px(c, x, top, rim);
+        }
+        // arbolitos en la capa cercana
+        if (layer) {
+          for (let i = 0; i < 9; i++) {
+            const tx = (i * 53 + seed * 17) % w;
+            const a = (tx / w) * Math.PI * 2;
+            const top = Math.round(h * 0.42 + Math.sin(a * f1 * 2 + seed) * 12 + Math.sin(a * f2 * 5 + seed * 2) * 6 + Math.sin(a * 11 + seed) * 1.5);
+            const tree = mix(body, T.outline, 0.25);
+            rect(c, tx, top - 6, 1, 6, tree);
+            rect(c, tx - 2, top - 9, 5, 4, tree);
+            rect(c, tx - 1, top - 11, 3, 2, tree);
+          }
+        }
+      });
+    });
+  }
+
+  // Sol del atardecer: disco con franjas retro
+  make(scene, 'sun-big', 44, 44, (c) =>
+    mask(c, 44, 44, (x, y) => {
+      const r = Math.hypot(x + 0.5 - 22, y + 0.5 - 22);
+      if (r > 21) return null;
+      if (y > 26 && (y - 26) % 5 >= 3 - Math.floor((y - 26) / 6)) return null;
+      return y < 14 ? '#fff1a8' : y < 24 ? '#ffd36b' : y < 32 ? '#ffae5c' : '#ff8a5c';
+    }, null),
+  );
+  // Sol de día: pequeño y suave
+  make(scene, 'sun', 20, 20, (c) =>
+    mask(c, 20, 20, (x, y) => {
+      const r = Math.hypot(x + 0.5 - 10, y + 0.5 - 10);
+      if (r > 9) return null;
+      return r < 6 && x < 10 && y < 10 ? '#fffbe0' : '#fff1a8';
+    }, null),
+  );
+  // Luna creciente
+  make(scene, 'moon', 18, 18, (c) =>
+    mask(c, 18, 18, (x, y) => {
+      const r = Math.hypot(x + 0.5 - 9, y + 0.5 - 9);
+      const r2 = Math.hypot(x + 0.5 - 13, y + 0.5 - 6);
+      if (r > 8 || r2 < 7) return null;
+      return r > 6.5 ? '#c8d0f4' : '#f2f4ff';
+    }, null),
+  );
+  generateMeadow(scene);
+  make(scene, 'star-px', 3, 3, (c) => bitmap(c, 0, 0, ['.x.', 'xwx', '.x.'], { x: 'rgba(255,255,255,0.55)', w: '#ffffff' }));
+  // Pájaro (2 fotogramas de aleteo), blanco para teñirlo con el color del mundo
+  makeFrames(scene, 'bird', 7, 4, 2, (c, f) =>
+    bitmap(c, 0, 0, f ? ['.......', 'xx...xx', '..xxx..', '...x...'] : ['x.....x', '.x...x.', '..xxx..', '...x...'], { x: '#ffffff' }),
+  );
+}
+
+// ------------------------------------------------------------------ pradera (campo de golf)
+
+function generateMeadow(scene) {
+  const o = '#2f2a2c';
+  // árbol redondo (copa con brillos) 22×28
+  make(scene, 'tree-round', 22, 28, (c) => {
+    mask(c, 22, 28, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y >= 17 && x >= 9 && x <= 12) return x === 9 ? '#9a6a44' : '#7a4e30'; // tronco
+      const blobs = [[11, 9, 8], [6, 12, 5.5], [16, 12, 5.5], [11, 14, 6]];
+      if (!blobs.some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r)) return null;
+      if (Math.hypot(cx - 8, cy - 6) < 4) return '#9fe46c';
+      if (cy > 15 || Math.hypot(cx - 15, cy - 13) < 4) return '#3f9a3c';
+      return '#5cc04a';
+    }, o);
+  });
+  // pino 16×30
+  make(scene, 'tree-pine', 16, 30, (c) => {
+    mask(c, 16, 30, (x, y) => {
+      if (y >= 24 && x >= 7 && x <= 8) return '#7a4e30';
+      if (y >= 24) return null;
+      const tier = y < 9 ? y / 9 : y < 17 ? (y - 6) / 11 : (y - 13) / 11;
+      const half = 1 + tier * 6.5;
+      if (Math.abs(x + 0.5 - 8) > half) return null;
+      return x < 8 ? '#4fae58' : '#2f8a46';
+    }, o);
+  });
+  // arbusto 14×8
+  make(scene, 'bush', 14, 8, (c) =>
+    mask(c, 14, 8, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y > 6) return null;
+      const inside = [[4, 5, 3.5], [8, 4, 4], [11, 5.5, 2.8]].some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r);
+      if (!inside) return null;
+      return Math.hypot(cx - 6, cy - 3) < 2 ? '#a6ec74' : cy > 5 ? '#3f9a3c' : '#5cc04a';
+    }, o),
+  );
+  // valla blanca 12×8 (se repite)
+  make(scene, 'fence', 12, 8, (c) =>
+    bitmap(c, 0, 0, [
+      '.o.....o....', 'owo...owo...', 'owooooowoooo', 'owwwwwwwwwww', 'owooooowoooo', 'owo...owo...', 'owo...owo...', 'ooo...ooo...',
+    ], { o, w: '#fff8ec' }),
+  );
+  // marcas del tee (salida): bolitas de color
+  for (const [k, col] of [['tee-red', '#ef4d5e'], ['tee-blue', '#4a86e0']]) {
+    make(scene, k, 5, 5, (c) => bitmap(c, 0, 0, ['.ooo.', 'ohcco', 'occco', 'occco', '.ooo.'], { o, h: '#ffffff', c: col }));
+  }
+  // tee de madera bajo la bola
+  make(scene, 'tee', 3, 4, (c) => bitmap(c, 0, 0, ['ooo', '.o.', '.o.', '.o.'], { o: '#f2d6a0' }));
 }
 
 // ------------------------------------------------------------------ interfaz
@@ -362,6 +496,8 @@ const ICONS = {
   sound: ['....x....', '...xx..x.', 'xxxxx...x', 'xxxxx.x.x', 'xxxxx.x.x', 'xxxxx...x', '...xx..x.', '....x....', '.........'],
   mute: ['....x....', '...xx....', 'xxxxx.x.x', 'xxxxx..x.', 'xxxxx.x.x', 'xxxxx....', '...xx....', '....x....', '.........'],
   back: ['...x.....', '..xx.....', '.xxxxxxxx', 'xxxxxxxxx', '.xxxxxxxx', '..xx.....', '...x.....', '.........', '.........'],
+  pause: ['.........', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.........'],
+  gear: ['...x.x...', '.x.xxx.x.', '..xxxxx..', 'xxxx.xxxx', '.xx...xx.', 'xxxx.xxxx', '..xxxxx..', '.x.xxx.x.', '...x.x...'],
 };
 
 function generateUi(scene) {

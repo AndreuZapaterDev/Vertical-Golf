@@ -18,7 +18,8 @@ function hash(x, y, s = 0) {
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
 }
 
-const MAT_OF = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, i: 3 };
+// 1 hierba · 2 arena · 3 hielo · 4 rough (hierba alta) · 5 green (alrededor del hoyo)
+const MAT_OF = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, i: 3, r: 4, G: 5 };
 
 /** ¿El píxel (lx,ly) de una casilla con este carácter es sólido? */
 export function cellSolid(ch, lx, ly) {
@@ -26,6 +27,8 @@ export function cellSolid(ch, lx, ly) {
     case '#':
     case 's':
     case 'i':
+    case 'r':
+    case 'G':
       return true;
     case '/':
       return ly + 0.5 >= T - (lx + 0.5);
@@ -106,6 +109,15 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
     water: rgb(P.water, 225), waterHi: rgb(P.waterHi, 235), waterMid: rgb(P.waterMid, 230),
   };
   C.rockHi = lighten(C.dirtLight, 0.35);
+  C.grassAlt = rgb(P.grassAlt || P.grass);
+  C.greenHi = rgb(P.greenHi || P.grassHi);
+  C.green = rgb(P.green || P.grass);
+  C.greenAlt = rgb(P.greenAlt || P.grass);
+  C.roughHi = rgb(P.roughHi || P.grass);
+  C.rough = rgb(P.rough || P.grassDark);
+  C.roughDark = rgb(P.roughDark || P.grassLine);
+  // franjas de césped cortado: bandas de 6 px que alternan tono (como un fairway)
+  const mow = (x) => P.mow && Math.floor(x / 6) % 2 === 1;
 
   const img = ctx.createImageData(w, h);
   const data = img.data;
@@ -121,10 +133,17 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
           let dd = 1;
           while (dd < 9 && S(x, y - dd - 1)) dd++;
           const openAbove = dd < 9; // hay aire (o agua) encima a poca distancia
-          if (m === 1) {
+          if (m === 4 && openAbove && dd <= 6) {
+            // rough: hierba alta y oscura con briznas verticales
+            const blade = hash(x, 0, 31) < 0.35;
+            col = dd === 1 ? (blade ? C.roughHi : C.rough) : dd <= 4 ? (blade || hash(x, y, 32) < 0.15 ? C.roughDark : C.rough) : C.grassLine;
+          } else if (m === 5 && openAbove && dd <= 3) {
+            // green: césped muy fino y claro con franjas suaves
+            col = dd === 1 ? C.greenHi : Math.floor(x / 4) % 2 ? C.greenAlt : C.green;
+          } else if (m === 1 || m === 4 || m === 5) {
             const gd = 4 + BUMP[x % 8];
             if (openAbove && dd === 1) col = C.grassHi;
-            else if (openAbove && dd <= 3) col = C.grass;
+            else if (openAbove && dd <= 3) col = mow(x) ? C.grassAlt : C.grass;
             else if (openAbove && dd < gd) col = C.grassDark;
             else if (openAbove && dd === gd) col = C.grassLine;
             else if (openAbove && dd <= gd + 2) col = C.stripe; // sombra bajo la hierba
@@ -163,6 +182,15 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
       } else if (!col && !water[i] && y + 2 < h && solid[i + 2 * w] === 1 && !solid[i + w] && hash(x, y + 1, 11) < 0.42 && hash(x, y, 13) < 0.3) {
         col = C.grassHi;
       }
+      // el rough asoma más alto (hasta 3 px) por encima del contorno
+      if (!col && !water[i]) {
+        const bh = Math.floor(hash(x, 0, 31) * 4); // altura de la brizna en esta columna (0–3)
+        for (let k = 1; k <= 3; k++) {
+          if (y + k >= h || !solid[i + k * w]) continue;
+          if (solid[i + k * w] === 4 && k <= bh) col = k === bh ? C.roughHi : C.rough;
+          break;
+        }
+      }
       if (col) {
         const o = i * 4;
         data[o] = col[0];
@@ -176,14 +204,16 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
 }
 
 /** Textura con todo el terreno de un nivel */
-export function renderTerrain(scene, key, grid, themeKey) {
+export function renderTerrain(scene, key, grid, themeKey, { open = false } = {}) {
   if (scene.textures.exists(key)) scene.textures.remove(key);
   const rows = grid.length;
   const cols = grid[0].length;
   const w = cols * T;
   const h = rows * T;
   const tex = scene.textures.createCanvas(key, w, h);
-  const cell = (x, y) => grid[Math.floor(y / T)]?.[Math.floor(x / T)] ?? '#';
+  // en los hoyos abiertos, fuera del mapa hay vacío (las islas llevan contorno por todos lados)
+  const outside = open ? '.' : '#';
+  const cell = (x, y) => grid[Math.floor(y / T)]?.[Math.floor(x / T)] ?? outside;
   paint(
     tex.getContext(),
     w,
@@ -198,6 +228,7 @@ export function renderTerrain(scene, key, grid, themeKey) {
       const ch = cell(x, y);
       return ch !== '/' && ch !== '\\';
     },
+    open ? { left: 0, right: 0, top: 0, bottom: 0 } : undefined,
   );
   tex.refresh();
   return key;

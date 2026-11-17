@@ -1,13 +1,14 @@
 import { transitionTo } from './TransitionScene.js';
 import Phaser from 'phaser';
-import { W, H, PAL, TILE } from '../constants.js';
+import { W, H, PAL, TILE, THEMES } from '../constants.js';
 import { Background } from '../gfx/background.js';
 import { renderTerrain } from '../gfx/terrain.js';
 import { LEVELS } from '../data/levels.js';
 import { UPGRADES, SKINS } from '../data/upgrades.js';
 import { progress } from '../systems/progress.js';
-import { sfx } from '../systems/audio.js';
+import { sfx, music } from '../systems/audio.js';
 import { fitCamera } from '../ui/camera.js';
+import { openSettings } from '../ui/settings.js';
 import { label, gradientFill, makeButton, iconButton, panel } from '../ui/widgets.js';
 import { isSupabaseEnabled } from '../services/supabase.js';
 
@@ -28,8 +29,9 @@ export default class MenuScene extends Phaser.Scene {
 
   create() {
     fitCamera(this);
-    const next = Math.min(progress.unlocked, LEVELS.length) - 1;
-    const theme = LEVELS[next].theme;
+    const next = progress.nextLevelIndex();
+    const nextLevel = LEVELS[next];
+    const theme = nextLevel.theme;
     this.bg = new Background(this, theme);
 
     const gy = H - MENU_MAP.length * TILE;
@@ -39,9 +41,9 @@ export default class MenuScene extends Phaser.Scene {
     this.add.image(0, gy, tk).setOrigin(0).setDepth(5);
 
     // nubes y decoración
-    const tint = { day: 0xffffff, sunset: 0xffe2d4, night: 0x9aa6dc }[theme];
+    const P = THEMES[theme];
     this.clouds = [[30, 40, 0], [180, 150, 2], [90, 300, 1], [210, 330, 0]].map(([x, y, k]) =>
-      Object.assign(this.add.image(x, y, `cloud${k}`).setTint(tint).setAlpha(theme === 'night' ? 0.35 : 0.75).setDepth(-50), { vx: 3 + k }),
+      Object.assign(this.add.image(x, y, `cloud${k}`).setTint(P.cloudTint ?? 0xffffff).setAlpha(P.cloudAlpha ?? 0.75).setDepth(-50), { vx: 3 + k }),
     );
     const top = (row) => gy + row * TILE + 1;
     this.add.sprite(10, top(2), 'tuft').setOrigin(0.5, 1).setDepth(6).play('tuft-sway');
@@ -78,8 +80,8 @@ export default class MenuScene extends Phaser.Scene {
     // Botones
     const play = makeButton(this, W / 2, 196, { color: 'green', w: 120, h: 32, text: 'JUGAR', size: 18, onClick: () => this.go('Game', { levelIndex: next }) });
     this.tweens.add({ targets: play, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    label(this, W / 2, 222, `Hoyo ${next + 1} · ${LEVELS[next].name}`, 10, { color: PAL.sand });
-    makeButton(this, W / 2, 250, { color: 'gold', w: 120, h: 26, text: 'NIVELES', size: 13, onClick: () => this.go('LevelSelect') });
+    label(this, W / 2, 222, `${nextLevel.worldName} · Hoyo ${nextLevel.number} · ${nextLevel.name}`, 10, { color: PAL.sand });
+    makeButton(this, W / 2, 250, { color: 'gold', w: 120, h: 26, text: 'MUNDOS', size: 13, onClick: () => this.go('Worlds') });
     const shop = makeButton(this, W / 2, 282, { color: 'blue', w: 120, h: 26, text: '   MEJORAS', size: 13, onClick: () => this.go('Shop', { back: 'Menu' }) });
     shop.add(this.add.image(-34, -2, 'up-power'));
     // aviso si hay alguna mejora o bola que ya puedes comprar
@@ -96,10 +98,28 @@ export default class MenuScene extends Phaser.Scene {
     this.add.image(78, 14, 'coin');
     label(this, 86, 14, `${progress.coins}`, 10, { ox: 0, color: PAL.sand });
 
-    const snd = iconButton(this, W - 13, 14, progress.sound ? 'sound' : 'mute', () => {
-      progress.sound = !progress.sound;
-      snd.icon.setTexture(progress.sound ? 'icon-sound' : 'icon-mute');
+    // Ajustes (música, efectos, vibración, temblor)
+    this.settingsPanel = null;
+    const openPanel = () => {
+      if (this.settingsPanel) return;
+      this.settingsPanel = openSettings(this, { onClose: () => (this.settingsPanel = null) });
+    };
+    iconButton(this, W - 13, 14, 'gear', openPanel);
+
+    // Modo DEV: todo desbloqueado (mundos, hoyos, bolas y mejoras gratis)
+    makeButton(this, W - 44, 14, {
+      color: progress.devMode ? 'orange' : 'gray', w: 38, h: 18, text: progress.devMode ? 'DEV ON' : 'DEV', size: 8,
+      onClick: () => {
+        progress.setDevMode(!progress.devMode);
+        this.scene.restart();
+      },
     });
+    this.input.keyboard?.on('keydown-ESC', () => this.settingsPanel?.close());
+    this.input.keyboard?.on('keydown-ENTER', () => {
+      if (!this.settingsPanel) this.go('Game', { levelIndex: next });
+    });
+    music.play(theme);
+    music.setPaused(false);
 
     label(this, W / 2, H - 9, isSupabaseEnabled ? '● online' : '○ offline', 8, { color: '#f0dcc0', strokeThickness: 2 }).setDepth(20);
 

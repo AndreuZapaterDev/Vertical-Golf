@@ -3,6 +3,7 @@ import { W, H, GRAVITY, VIEW } from './constants.js';
 import BootScene from './scenes/BootScene.js';
 import MenuScene from './scenes/MenuScene.js';
 import LevelSelectScene from './scenes/LevelSelectScene.js';
+import WorldSelectScene from './scenes/WorldSelectScene.js';
 import GameScene from './scenes/GameScene.js';
 import UIScene from './scenes/UIScene.js';
 import TransitionScene from './scenes/TransitionScene.js';
@@ -38,5 +39,5 @@ export const gameConfig = {
     },
   },
   // Orden de dibujado: Game < UI < Transition
-  scene: [BootScene, MenuScene, LevelSelectScene, ShopScene, GameScene, UIScene, TransitionScene],
+  scene: [BootScene, MenuScene, WorldSelectScene, LevelSelectScene, ShopScene, GameScene, UIScene, TransitionScene],
 };

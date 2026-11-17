@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
-import { W, H, PAL, hex } from '../constants.js';
+import { W, H, PAL, hex, THEMES } from '../constants.js';
 import { MECHANICS } from '../data/levels.js';
 import { progress } from '../systems/progress.js';
-import { sfx } from '../systems/audio.js';
+import { sfx, music } from '../systems/audio.js';
 import { fitCamera } from '../ui/camera.js';
 import { label, makeButton, iconButton, panel } from '../ui/widgets.js';
+import { openSettings } from '../ui/settings.js';
 
 function scoreName(strokes, par) {
   if (strokes === 1) return '¡HOYO EN UNO!';
@@ -29,6 +30,10 @@ export default class UIScene extends Phaser.Scene {
     this.gs = data.gameScene;
     this.info = this.gs.getHudState();
     this.toast = null;
+    this.paused = false;
+    this.pauseMenu = null;
+    this.settingsPanel = null;
+    this.completeAction = null;
   }
 
   create() {
@@ -41,14 +46,14 @@ export default class UIScene extends Phaser.Scene {
 
     // HUD superior
     panel(this, 30, 15, 54, 24, 'hud9');
-    label(this, 30, 10, `HOYO ${I.levelIndex + 1}`, 10, { weight: '700' });
+    label(this, 30, 10, `HOYO ${I.hole}`, 10, { weight: '700' });
     label(this, 30, 21, `PAR ${I.par}`, 8, { color: '#f0dcc0', strokeThickness: 2 });
 
     panel(this, W / 2, 16, 52, 28, 'hud9');
     this.strokesText = label(this, W / 2, 12, '0', 18, { weight: '700', color: PAL.sand });
     label(this, W / 2, 25, 'GOLPES', 7, { color: '#f0dcc0', strokeThickness: 2 });
 
-    iconButton(this, W - 13, 15, 'home', () => this.gs.goToMenu());
+    iconButton(this, W - 13, 15, 'pause', () => this.pause());
     iconButton(this, W - 33, 15, 'restart', () => this.gs.restartLevel());
 
     this.gemIcons = Array.from({ length: I.gemsTotal }, (_, i) => this.add.image(10 + i * 11, 36, 'gem').setTint(0x6e5458).setAlpha(0.9));
@@ -77,7 +82,84 @@ export default class UIScene extends Phaser.Scene {
     this.bus.on('brake', this.onBrake, this);
     this.bus.on('shield', this.onShield, this);
 
+    this.setupKeys();
+    // Si cambias de pestaña o bloqueas el móvil, el juego queda en pausa
+    this.onHidden = () => this.pause();
+    this.game.events.on('hidden', this.onHidden);
+    this.events.once('shutdown', () => {
+      this.game.events.off('hidden', this.onHidden);
+      music.setPaused(false);
+    });
+
     this.showIntroCard();
+  }
+
+  // ---------------------------------------------------------------- Pausa y teclado
+
+  setupKeys() {
+    const kb = this.input.keyboard;
+    if (!kb) return;
+    kb.on('keydown-ESC', () => {
+      if (this.settingsPanel) this.settingsPanel.close();
+      else if (this.paused) this.resume();
+      else if (this.gs.aiming) this.gs.cancelAim();
+      else this.pause();
+    });
+    kb.on('keydown-P', () => {
+      if (this.settingsPanel) return;
+      if (this.paused) this.resume();
+      else this.pause();
+    });
+    kb.on('keydown-ENTER', () => {
+      if (this.completeAction) {
+        const go = this.completeAction;
+        this.completeAction = null;
+        sfx.click();
+        go();
+      } else if (this.paused && !this.settingsPanel) this.resume();
+    });
+  }
+
+  pause() {
+    if (this.paused || !this.gs.canPause?.()) return;
+    this.gs.cancelAim();
+    this.paused = true;
+    this.scene.pause('Game');
+    music.setPaused(true);
+    sfx.pause();
+
+    const I = this.info;
+    const c = this.add.container(W / 2, H / 2).setDepth(70);
+    const blocker = this.add.rectangle(0, 0, W, H, hex('#35282c'), 0.55).setInteractive();
+    blocker.on('pointerdown', (_p, _x, _y, e) => e?.stopPropagation?.());
+    c.add(blocker);
+    c.add(panel(this, 0, 0, 176, 210));
+    c.add(label(this, 0, -84, 'PAUSA', 22, { weight: '700', color: PAL.sand, strokeThickness: 4 }));
+    c.add(label(this, 0, -60, `${I.worldName} · Hoyo ${I.hole}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
+    c.add(label(this, 0, -46, `Golpes ${this.gs.strokes} · Par ${I.par}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
+    const btn = (y, color, text, cb) => c.add(makeButton(this, 0, y, { color, w: 120, h: 26, text, size: 13, onClick: cb }));
+    btn(-16, 'green', 'Continuar', () => this.resume());
+    btn(16, 'blue', 'Reiniciar', () => this.gs.restartLevel());
+    btn(48, 'gold', 'Ajustes', () => {
+      if (this.settingsPanel) return;
+      this.settingsPanel = openSettings(this, { depth: 90, onClose: () => (this.settingsPanel = null) });
+    });
+    btn(80, 'orange', 'Menú principal', () => this.gs.goToMenu());
+    c.setAlpha(0).setScale(0.92);
+    this.tweens.add({ targets: c, alpha: 1, scale: 1, duration: 160, ease: 'Back.easeOut' });
+    this.pauseMenu = c;
+  }
+
+  resume() {
+    if (!this.paused) return;
+    this.settingsPanel?.close();
+    this.paused = false;
+    const c = this.pauseMenu;
+    this.pauseMenu = null;
+    this.tweens.add({ targets: c, alpha: 0, duration: 120, onComplete: () => c.destroy() });
+    this.scene.resume('Game');
+    music.setPaused(false);
+    sfx.resume();
   }
 
   // ---------------------------------------------------------------- Habilidades
@@ -128,7 +210,8 @@ export default class UIScene extends Phaser.Scene {
 
   /** Partículas ambientales: hojas (día), pétalos (atardecer), luciérnagas (noche) */
   ambientFx(theme) {
-    if (theme === 'night') {
+    const kind = THEMES[theme]?.ambient || 'leaf';
+    if (kind === 'firefly') {
       this.add.particles(0, 0, 'glow', {
         x: { min: 0, max: W }, y: { min: 60, max: H }, lifespan: 4000, speedX: { min: -6, max: 6 }, speedY: { min: -8, max: 3 },
         scale: { min: 0.06, max: 0.12 }, tint: 0xd8ff8a, blendMode: 'ADD', frequency: 450,
@@ -136,7 +219,7 @@ export default class UIScene extends Phaser.Scene {
       });
       return;
     }
-    this.add.particles(0, 0, theme === 'sunset' ? 'petal' : 'leaf', {
+    this.add.particles(0, 0, kind, {
       x: { min: -10, max: W }, y: -6, lifespan: 10000, speedX: { min: 4, max: 14 }, speedY: { min: 10, max: 20 },
       rotate: { start: 0, end: 360 }, frequency: 1400, alpha: 0.9,
     });
@@ -196,7 +279,7 @@ export default class UIScene extends Phaser.Scene {
     const c = this.add.container(W / 2, Math.round(H * 0.4));
     c.add([
       panel(this, 0, 0, 176, 84),
-      label(this, 0, -24, `HOYO ${I.levelIndex + 1}`, 22, { weight: '700', color: PAL.sand, strokeThickness: 4 }),
+      label(this, 0, -24, `HOYO ${I.hole}`, 22, { weight: '700', color: PAL.sand, strokeThickness: 4 }),
       label(this, 0, 2, I.name, 13, { weight: '600' }),
       label(this, 0, 22, `Par ${I.par}  ·  ${I.heightM} m`, 9, { color: '#f0dcc0', strokeThickness: 2 }),
     ]);
@@ -223,8 +306,15 @@ export default class UIScene extends Phaser.Scene {
 
   showTutorial() {
     const hand = this.add.image(W / 2, H * 0.55, 'hand');
-    const p = panel(this, W / 2, H - 46, 196, 36);
-    const txt = label(this, W / 2, H - 46, 'Arrastra hacia abajo y suelta\npara lanzar la bola', 10, { lineSpacing: 2 });
+    // en ordenador también se explica el teclado
+    const keyboard = !this.sys.game.device.input.touch && this.input.keyboard;
+    const h = keyboard ? 50 : 36;
+    const y = 64 + h / 2; // arriba, bajo el HUD: abajo taparía la bola en la salida
+    const p = panel(this, W / 2, y, 200, h);
+    const text = keyboard
+      ? 'Arrastra hacia abajo y suelta\npara lanzar la bola\nTeclado: flechas + ESPACIO'
+      : 'Arrastra hacia abajo y suelta\npara lanzar la bola';
+    const txt = label(this, W / 2, y, text, 10, { lineSpacing: 2 });
     this.tweens.add({ targets: hand, y: { from: H * 0.5, to: H * 0.66 }, alpha: { from: 1, to: 0.3 }, duration: 900, repeat: -1, repeatDelay: 300, ease: 'Cubic.easeInOut' });
     this.tutorial = [hand, p, txt];
   }
@@ -234,6 +324,11 @@ export default class UIScene extends Phaser.Scene {
       const t = this.tutorial;
       this.tutorial = null;
       this.tweens.add({ targets: t, alpha: 0, duration: 250, onComplete: () => t.forEach((o) => o.destroy()) });
+      // primer hoyo con islas: se explica qué pasa si te caes
+      if (this.info.open) {
+        const m = MECHANICS.edge;
+        this.time.delayedCall(400, () => this.showToast({ title: m.title, text: m.text, color: m.color, duration: 5000 }));
+      }
     }
   }
 
@@ -273,7 +368,7 @@ export default class UIScene extends Phaser.Scene {
     // cinta del título
     p.add(this.add.nineslice(0, -128, 'btn9-gold', 0, 184, 30, 5, 5, 5, 7));
     p.add(label(this, 0, -130, scoreName(r.strokes, r.par), 18, { weight: '700', stroke: '#7a3a00', strokeThickness: 3 }));
-    p.add(label(this, 0, -100, `Hoyo ${r.levelIndex + 1} · ${r.name}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
+    p.add(label(this, 0, -100, `${r.worldName} · Hoyo ${r.hole} · ${r.name}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
 
     const starPos = [[-38, -64], [0, -72], [38, -64]];
     const stars = starPos.map(([sx, sy], i) => {
@@ -302,13 +397,17 @@ export default class UIScene extends Phaser.Scene {
       const b = label(this, 0, 50, '¡Nuevo récord!', 11, { color: PAL.orange, weight: '700' });
       p.add(b);
       this.tweens.add({ targets: b, scale: 1.12, duration: 400, yoyo: true, repeat: -1 });
+    } else if (r.worldJustCompleted) {
+      const b = label(this, 0, 50, `¡${r.worldName} completada!`, 11, { color: PAL.grassL, weight: '700' });
+      p.add(b);
+      this.tweens.add({ targets: b, scale: 1.12, duration: 400, yoyo: true, repeat: -1 });
     } else if (!r.hasNext) {
-      p.add(label(this, 0, 50, '¡Has conquistado la cumbre!', 11, { color: PAL.grassL, weight: '700' }));
+      p.add(label(this, 0, 50, `${r.worldName}: ${r.worldStars}/${r.worldStarsMax} estrellas`, 10, { color: PAL.grassL, weight: '700' }));
     }
 
     p.add(makeButton(this, -46, 78, { color: 'blue', w: 84, text: 'Repetir', onClick: () => this.gs.restartLevel() }));
     if (r.hasNext) p.add(makeButton(this, 46, 78, { color: 'green', w: 84, text: 'Siguiente', onClick: () => this.gs.goToLevel(r.levelIndex + 1) }));
-    else p.add(makeButton(this, 46, 78, { color: 'green', w: 84, text: 'Menú', onClick: () => this.gs.goToMenu() }));
+    else p.add(makeButton(this, 46, 78, { color: 'green', w: 84, text: 'Hoyos', onClick: () => this.gs.goToHoles() }));
 
     const link = (x, text, cb) => {
       const t = label(this, x, 108, text, 10, { color: '#f0dcc0' }).setInteractive({ useHandCursor: true });
@@ -347,6 +446,8 @@ export default class UIScene extends Phaser.Scene {
       duration: 500,
       ease: 'Back.easeOut',
       onComplete: () => {
+        // ENTER = botón principal (Siguiente o Menú)
+        this.completeAction = r.hasNext ? () => this.gs.goToLevel(r.levelIndex + 1) : () => this.gs.goToHoles();
         this.tweens.add({ targets: rays, alpha: 0.35, duration: 600 });
         this.tweens.add({ targets: rays, angle: 360, duration: 12000, repeat: -1 });
         for (let i = 0; i < r.stars; i++) {

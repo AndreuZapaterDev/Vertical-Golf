@@ -46,7 +46,8 @@ function pressable(scene, target, onClick) {
     scene.tweens.add({ targets: target, scale: 1, duration: 90 });
     target.y = y0;
   });
-  target.on('pointerdown', () => {
+  target.on('pointerdown', (_p, _x, _y, e) => {
+    e?.stopPropagation?.(); // que el toque no llegue a la escena de juego (no empieza a apuntar)
     sfx.unlock();
     target.y = y0 + 1;
   });
