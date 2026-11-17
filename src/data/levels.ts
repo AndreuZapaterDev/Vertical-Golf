@@ -1,9 +1,9 @@
-import { COLS } from '../constants.js';
-import { WORLDS } from './worlds.js';
+import { COLS, type ThemeKey } from '../constants';
+import { WORLDS } from './worlds';
 
 /**
- * Los hoyos se dibujan como mapas de texto en data/worlds/<mundo>.js (18 columnas interiores;
- * las paredes laterales y el suelo se añaden solos). Fila 0 = arriba.
+ * Los hoyos se dibujan como mapas de texto en data/worlds/<mundo>.ts (18 columnas interiores;
+ * las paredes laterales y el suelo se añaden solos, salvo en los hoyos abiertos). Fila 0 = arriba.
  *
  *   .  vacío            #  tierra con hierba     /  rampa que sube a la derecha
  *   \  rampa que sube a la izquierda              =  plataforma fina
@@ -14,13 +14,72 @@ import { WORLDS } from './worlds.js';
  *   *  gema             S  salida                H  hoyo
  */
 
+export type MechanicKey = keyof typeof MECHANICS;
+
+/** Un hoyo tal y como se escribe en data/worlds/<mundo>.ts */
+export interface LevelDef {
+  name: string;
+  par: number;
+  map: string;
+  /** islas flotantes sin paredes ni suelo (caerse = fuera de límites) */
+  open?: boolean;
+  tutorial?: boolean;
+  /** mecánica que se presenta con un aviso al empezar */
+  intro?: MechanicKey;
+  /** px/s² de empuje horizontal mientras la bola vuela (+ derecha) */
+  wind?: number;
+}
+
+/** Un hoyo con los datos de su mundo y su posición */
+export interface LevelMeta extends LevelDef {
+  theme: ThemeKey;
+  world: string;
+  worldName: string;
+  worldIndex: number;
+  number: number;
+  holes: number;
+  id: string;
+  code: number;
+}
+
+export interface Cell {
+  c: number;
+  r: number;
+}
+export interface Saw extends Cell {
+  range: number;
+}
+/** tramo horizontal de n casillas (plataformas móviles, bloques frágiles) */
+export interface Span extends Cell {
+  n: number;
+}
+
+/** Hoyo ya convertido en rejilla + objetos (lo que usa GameScene) */
+export interface ParsedLevel extends LevelMeta {
+  index: number;
+  open: boolean;
+  grid: string[][];
+  cols: number;
+  rows: number;
+  groundRow: number;
+  start: Cell;
+  hole: Cell;
+  gems: Cell[];
+  saws: Saw[];
+  bumpers: Cell[];
+  mushrooms: Cell[];
+  movers: Span[];
+  crumbles: Span[];
+  wind: number;
+}
+
 /**
  * Lista plana de todos los hoyos jugables, en orden de mundos.
  * Cada hoyo sabe a qué mundo pertenece y su número dentro de él.
  *   id    'meadow-3' (clave del guardado)
  *   code  101, 102… (mundo·100 + hoyo; es el número que se guarda en Supabase)
  */
-export const LEVELS = WORLDS.flatMap((w, wi) =>
+export const LEVELS: LevelMeta[] = WORLDS.flatMap((w, wi) =>
   w.levels.map((l, i) => ({
     ...l,
     theme: w.theme,
@@ -34,8 +93,14 @@ export const LEVELS = WORLDS.flatMap((w, wi) =>
   })),
 );
 
-export const levelIndexById = (id) => LEVELS.findIndex((l) => l.id === id);
-export const levelsOfWorld = (worldId) => LEVELS.filter((l) => l.world === worldId);
+export const levelIndexById = (id: string) => LEVELS.findIndex((l) => l.id === id);
+export const levelsOfWorld = (worldId: string) => LEVELS.filter((l) => l.world === worldId);
+
+export interface Mechanic {
+  title: string;
+  text: string;
+  color: string;
+}
 
 export const MECHANICS = {
   ramp: { title: 'Cuencos y rampas', text: 'La bola rueda cuesta abajo y se queda en el fondo del cuenco.', color: '#b8ec6a' },
@@ -50,7 +115,7 @@ export const MECHANICS = {
   saw: { title: 'Sierras', text: 'Tocarlas suma un golpe de penalización.', color: '#ef4d5e' },
   edge: { title: 'Islas flotantes', text: 'Si la bola cae por un borde, +1 golpe y vuelves al último sitio. ¡Mide bien la fuerza!', color: '#ffd36b' },
   wind: { title: 'Brisa', text: 'El viento empuja la bola mientras vuela. Mira las flechas.', color: '#7fe3f5' },
-};
+} satisfies Record<string, Mechanic>;
 
 const GROUND_ROWS = 3;
 
@@ -62,16 +127,18 @@ const GROUND_ROWS = 3;
  *  - abierto (`open: true`): islas flotantes sin paredes ni suelo, de cualquier ancho.
  *    Si la bola cae por un borde, es "fuera de límites" (+1 golpe y vuelta al último sitio seguro).
  */
-export function parseLevel(index) {
+export function parseLevel(index: number): ParsedLevel {
   const meta = LEVELS[index];
   const open = !!meta.open;
   const lines = meta.map.replace(/^\r?\n/, '').split('\n').map((l) => l.replace(/\r$/, ''));
   const inner = open ? Math.max(...lines.map((l) => l.length)) : COLS - 2;
   const cols = open ? inner : COLS;
-  const grid = [];
-  const objects = { gems: [], saws: [], bumpers: [], mushrooms: [], movers: [], crumbles: [] };
-  let start = null;
-  let hole = null;
+  const grid: string[][] = [];
+  const objects = {
+    gems: [] as Cell[], saws: [] as Saw[], bumpers: [] as Cell[], mushrooms: [] as Cell[], movers: [] as Span[], crumbles: [] as Span[],
+  };
+  let start: Cell | null = null;
+  let hole: Cell | null = null;
 
   lines.forEach((raw, r) => {
     if (raw.length !== inner) console.warn(`[${meta.id}] fila ${r} tiene ${raw.length} columnas (deberían ser ${inner})`);
@@ -90,7 +157,7 @@ export function parseLevel(index) {
       if ('SH*XYOM'.includes(ch)) row[c] = '.';
     }
     // tramos de plataformas móviles y bloques frágiles
-    for (const [ch, list] of [['P', objects.movers], ['C', objects.crumbles]]) {
+    for (const [ch, list] of [['P', objects.movers], ['C', objects.crumbles]] as const) {
       for (let c = 0; c < cols; c++) {
         if (row[c] !== ch) continue;
         let n = 0;
@@ -104,16 +171,19 @@ export function parseLevel(index) {
   });
   if (!open) for (let i = 0; i < GROUND_ROWS; i++) grid.push('#'.repeat(COLS).split(''));
 
-  if (!start || !hole) console.warn(`[${meta.id}] falta la salida (S) o el hoyo (H)`);
+  // (TypeScript no ve las asignaciones dentro del forEach: se recuperan con un cast)
+  const s = start as Cell | null;
+  const h = hole as Cell | null;
+  if (!s || !h) throw new Error(`[${meta.id}] falta la salida (S) o el hoyo (H)`);
 
   // El green: el césped que rodea el hoyo se pinta como césped fino (misma física que la hierba)
-  if (hole) {
-    const r = hole.r + 1;
+  {
+    const r = h.r + 1;
     const c0 = open ? 0 : 1;
     const c1 = open ? cols - 1 : cols - 2;
-    for (let c = hole.c - 3; c <= hole.c + 3; c++) if (grid[r]?.[c] === '#' && c >= c0 && c <= c1) grid[r][c] = 'G';
+    for (let c = h.c - 3; c <= h.c + 3; c++) if (grid[r]?.[c] === '#' && c >= c0 && c <= c1) grid[r][c] = 'G';
   }
 
-  const groundRow = open ? (start ? start.r + 1 : grid.length) : grid.length - GROUND_ROWS;
-  return { ...meta, index, open, grid, cols, rows: grid.length, groundRow, start, hole, ...objects, wind: meta.wind || 0 };
+  const groundRow = open ? s.r + 1 : grid.length - GROUND_ROWS;
+  return { ...meta, index, open, grid, cols, rows: grid.length, groundRow, start: s, hole: h, ...objects, wind: meta.wind || 0 };
 }

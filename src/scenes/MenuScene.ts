@@ -1,16 +1,17 @@
-import { transitionTo } from './TransitionScene.js';
+import { transitionTo } from './TransitionScene';
 import Phaser from 'phaser';
-import { W, H, PAL, TILE, THEMES } from '../constants.js';
-import { Background } from '../gfx/background.js';
-import { renderTerrain } from '../gfx/terrain.js';
-import { LEVELS } from '../data/levels.js';
-import { UPGRADES, SKINS } from '../data/upgrades.js';
-import { progress } from '../systems/progress.js';
-import { sfx, music } from '../systems/audio.js';
-import { fitCamera } from '../ui/camera.js';
-import { openSettings } from '../ui/settings.js';
-import { label, gradientFill, makeButton, iconButton, panel } from '../ui/widgets.js';
-import { isSupabaseEnabled } from '../services/supabase.js';
+import { W, H, PAL, TILE, THEMES } from '../constants';
+import { Background } from '../gfx/background';
+import { renderTerrain } from '../gfx/terrain';
+import { tintFill } from '../gfx/tint';
+import { openSettings, type SettingsPanel } from '../ui/settings';
+import { LEVELS } from '../data/levels';
+import { UPGRADES, SKINS } from '../data/upgrades';
+import { progress } from '../systems/progress';
+import { sfx, music } from '../systems/audio';
+import { fitCamera } from '../ui/camera';
+import { label, gradientFill, makeButton, iconButton, panel } from '../ui/widgets';
+import { isSupabaseEnabled } from '../services/supabase';
 
 // Escenario decorativo del menú, con el mismo pintor de terreno que los niveles
 const MENU_MAP = [
@@ -22,7 +23,18 @@ const MENU_MAP = [
   '####################',
 ];
 
+type Cloud = Phaser.GameObjects.Image & { vx: number };
+
 export default class MenuScene extends Phaser.Scene {
+  bg!: Background;
+  clouds: Cloud[] = [];
+  ballY = 0;
+  ball!: Phaser.GameObjects.Sprite;
+  trail!: Phaser.GameObjects.Graphics;
+  trailPts: { x: number; y: number }[] = [];
+  dust!: Phaser.GameObjects.Particles.ParticleEmitter;
+  settingsPanel: SettingsPanel | null = null;
+
   constructor() {
     super('Menu');
   }
@@ -37,7 +49,7 @@ export default class MenuScene extends Phaser.Scene {
     const gy = H - MENU_MAP.length * TILE;
     const grid = MENU_MAP.map((row) => row.split(''));
     const tk = renderTerrain(this, `menu-terrain-${theme}`, grid, theme);
-    this.add.image(3, gy + 4, tk).setOrigin(0).setTintFill(0x1a1020).setAlpha(0.16).setDepth(4);
+    tintFill(this.add.image(3, gy + 4, tk), 0x1a1020).setOrigin(0).setAlpha(0.16).setDepth(4);
     this.add.image(0, gy, tk).setOrigin(0).setDepth(5);
 
     // nubes y decoración
@@ -45,7 +57,7 @@ export default class MenuScene extends Phaser.Scene {
     this.clouds = [[30, 40, 0], [180, 150, 2], [90, 300, 1], [210, 330, 0]].map(([x, y, k]) =>
       Object.assign(this.add.image(x, y, `cloud${k}`).setTint(P.cloudTint ?? 0xffffff).setAlpha(P.cloudAlpha ?? 0.75).setDepth(-50), { vx: 3 + k }),
     );
-    const top = (row) => gy + row * TILE + 1;
+    const top = (row: number) => gy + row * TILE + 1;
     this.add.sprite(10, top(2), 'tuft').setOrigin(0.5, 1).setDepth(6).play('tuft-sway');
     this.add.sprite(84, top(3), 'flower0').setOrigin(0.5, 1).setDepth(6).play('flower0-sway');
     this.add.sprite(140, top(2), 'flower1').setOrigin(0.5, 1).setDepth(6).play({ key: 'flower1-sway', delay: 400 });
@@ -136,7 +148,7 @@ export default class MenuScene extends Phaser.Scene {
       to: 1,
       duration: 380 + h * 4,
       onUpdate: (tw) => {
-        const t = tw.getValue();
+        const t = tw.getValue() ?? 0;
         this.ball.x = fromX + (toX - fromX) * t;
         this.ball.y = y0 - 4 * h * t * (1 - t);
         this.ball.setFrame(((Math.floor(this.ball.x / 3) % 4) + 4) % 4);
@@ -149,12 +161,12 @@ export default class MenuScene extends Phaser.Scene {
     });
   }
 
-  go(key, data) {
+  go(key: string, data?: object) {
     sfx.whoosh();
     transitionTo(this, () => this.scene.start(key, data));
   }
 
-  update(_, delta) {
+  update(_: number, delta: number) {
     this.bg.update(delta / 1000);
     for (const c of this.clouds) {
       c.x += c.vx * (delta / 1000);

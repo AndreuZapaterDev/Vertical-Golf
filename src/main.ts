@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
-import { gameConfig } from './config.js';
+import { gameConfig } from './config';
 
 // Espera a la fuente (máx. 2,5 s) para que los textos no salgan con la tipografía por defecto
 async function start() {
   try {
     await Promise.race([
       document.fonts.load('16px "Jersey 10"'),
-      new Promise((resolve) => setTimeout(resolve, 2500)),
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
     ]);
   } catch {
     /* sin conexión: se usa la fuente de respaldo */

@@ -1,26 +1,29 @@
-import { W, H, PAL, hex } from '../constants.js';
-import { progress } from '../systems/progress.js';
-import { sfx, haptic } from '../systems/audio.js';
-import { label, makeButton, panel } from './widgets.js';
+import type Phaser from 'phaser';
+import { W, H, PAL, hex } from '../constants';
+import { progress, type Settings } from '../systems/progress';
+import { sfx, haptic } from '../systems/audio';
+import { label, makeButton, panel, stopEvent } from './widgets';
 
 const STEPS = 5; // el volumen va de 0 a 100 % en saltos de 20 %
+
+export type SettingsPanel = Phaser.GameObjects.Container & { close: () => void; closing: boolean };
 
 /**
  * Ventana de ajustes (música, efectos, vibración y temblor de cámara).
  * Se usa desde el menú principal y desde la pausa. Devuelve el contenedor con .close().
  */
-export function openSettings(scene, { onClose, depth = 80 } = {}) {
-  const c = scene.add.container(W / 2, H / 2).setDepth(depth);
+export function openSettings(scene: Phaser.Scene, { onClose, depth = 80 }: { onClose?: () => void; depth?: number } = {}): SettingsPanel {
+  const c = Object.assign(scene.add.container(W / 2, H / 2).setDepth(depth), { close: () => {}, closing: false });
   const blocker = scene.add.rectangle(0, 0, W, H, hex('#35282c'), 0.6).setInteractive();
-  blocker.on('pointerdown', (_p, _x, _y, e) => e?.stopPropagation?.());
+  blocker.on('pointerdown', stopEvent);
   c.add(blocker);
   c.add(panel(scene, 0, 0, 204, 200));
   c.add(label(scene, 0, -80, 'AJUSTES', 18, { weight: '700', color: PAL.sand, strokeThickness: 3 }));
 
-  const rowLabel = (y, text) => c.add(label(scene, -88, y, text, 11, { ox: 0, strokeThickness: 2 }));
+  const rowLabel = (y: number, text: string) => c.add(label(scene, -88, y, text, 11, { ox: 0, strokeThickness: 2 }));
 
   // --- volumen: [-] ■■■□□ [+]
-  const volumeRow = (y, key, text) => {
+  const volumeRow = (y: number, key: 'music' | 'sfx', text: string) => {
     rowLabel(y, text);
     const bars = scene.add.graphics();
     c.add(bars);
@@ -33,7 +36,7 @@ export function openSettings(scene, { onClose, depth = 80 } = {}) {
         bars.fillStyle(i < v ? hex('#b8ec6a') : hex('#5a4448'), 1).fillRect(x, y - 4 - i, 5, 8 + i);
       }
     };
-    const change = (d) => {
+    const change = (d: number) => {
       const v = Math.round(progress.settings[key] * STEPS);
       const nv = Math.min(STEPS, Math.max(0, v + d));
       if (nv === v) return sfx.denied();
@@ -47,7 +50,7 @@ export function openSettings(scene, { onClose, depth = 80 } = {}) {
   };
 
   // --- interruptor SÍ / NO
-  const toggleRow = (y, key, text, onEnable) => {
+  const toggleRow = (y: number, key: Extract<keyof Settings, 'vibration' | 'shake'>, text: string, onEnable?: () => void) => {
     rowLabel(y, text);
     const btn = makeButton(scene, 50, y, { color: 'green', w: 58, h: 20, text: '', size: 11, onClick: () => {
       progress.setSetting(key, !progress.settings[key]);
@@ -56,8 +59,8 @@ export function openSettings(scene, { onClose, depth = 80 } = {}) {
     } });
     const draw = () => {
       const on = progress.settings[key];
-      btn.list[0].setTexture(on ? 'btn9-green' : 'btn9-gray');
-      btn.list[1].setText(on ? 'SÍ' : 'NO');
+      (btn.list[0] as Phaser.GameObjects.NineSlice).setTexture(on ? 'btn9-green' : 'btn9-gray');
+      (btn.list[1] as Phaser.GameObjects.Text).setText(on ? 'SÍ' : 'NO');
     };
     c.add(btn);
     draw();

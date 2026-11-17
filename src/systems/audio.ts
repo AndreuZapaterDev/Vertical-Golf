@@ -1,4 +1,4 @@
-import { progress } from './progress.js';
+import { progress } from './progress';
 
 /**
  * Audio chiptune sintetizado con WebAudio (sin archivos).
@@ -10,20 +10,21 @@ import { progress } from './progress.js';
  * La música es generativa: progresión de acordes por mundo + bajo + arpegio + percusión
  * y una melodía que se inventa por frases (A A B A) y va cambiando.
  */
-let ctx = null;
-let master = null;
-let sfxBus = null;
-let musicBus = null;
-let musicDuck = null;
-let musicFilter = null;
-let noiseBuf = null;
+let ctx: AudioContext | null = null;
+// Los nodos se crean junto con el AudioContext (en ac()); antes de eso no se usan nunca
+let master!: GainNode;
+let sfxBus!: GainNode;
+let musicBus!: GainNode;
+let musicDuck!: GainNode;
+let musicFilter!: BiquadFilterNode;
+let noiseBuf!: AudioBuffer;
 
 const SFX_GAIN = 0.4;
 const MUSIC_GAIN = 0.2;
 
-function ac() {
+function ac(): AudioContext | null {
   if (!ctx) {
-    const AC = window.AudioContext || window.webkitAudioContext;
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
@@ -70,7 +71,15 @@ document.addEventListener('visibilitychange', () => {
 
 // ------------------------------------------------------------------ efectos
 
-function tone(freq, dur, { type = 'square', vol = 0.12, slideTo = null, delay = 0 } = {}) {
+interface ToneOpts {
+  type?: OscillatorType;
+  vol?: number;
+  /** frecuencia final (glissando) */
+  slideTo?: number | null;
+  delay?: number;
+}
+
+function tone(freq: number, dur: number, { type = 'square', vol = 0.12, slideTo = null, delay = 0 }: ToneOpts = {}) {
   const c = ac();
   if (!c || progress.settings.sfx <= 0) return;
   const t = c.currentTime + delay;
@@ -87,7 +96,7 @@ function tone(freq, dur, { type = 'square', vol = 0.12, slideTo = null, delay = 
   o.stop(t + dur + 0.02);
 }
 
-function noise(dur, { vol = 0.2, freq = 1200, delay = 0, type = 'lowpass' } = {}) {
+function noise(dur: number, { vol = 0.2, freq = 1200, delay = 0, type = 'lowpass' }: { vol?: number; freq?: number; delay?: number; type?: BiquadFilterType } = {}) {
   const c = ac();
   if (!c || progress.settings.sfx <= 0) return;
   const t = c.currentTime + delay;
@@ -114,7 +123,7 @@ export const sfx = {
     if (power > 0.85) tone(70, 0.12, { type: 'sine', slideTo: 40, vol: 0.25 });
   },
   /** Clic de carga al apuntar: sube de tono con cada cuarto de potencia */
-  charge(step) {
+  charge(step: number) {
     tone(380 + step * 140, 0.03, { vol: 0.05 });
   },
   chargeMax() {
@@ -191,7 +200,7 @@ export const sfx = {
 // ------------------------------------------------------------------ vibración
 
 /** Vibración en móviles (si el ajuste está activo y el navegador la soporta) */
-export function haptic(pattern) {
+export function haptic(pattern: number | number[]) {
   if (!progress.settings.vibration || typeof navigator === 'undefined' || !navigator.vibrate) return;
   try {
     navigator.vibrate(pattern);
@@ -202,13 +211,43 @@ export function haptic(pattern) {
 
 // ------------------------------------------------------------------ música generativa
 
-const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const midiHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+
+interface Song {
+  bpm: number;
+  /** tónica (MIDI) */
+  root: number;
+  swing: number;
+  /** acordes: semitonos sobre la tónica */
+  chords: number[][];
+  /** escala de la melodía */
+  scale: number[];
+  /** ritmos de la melodía: [inicio, duración] en semicorcheas */
+  rhythms: [number, number][][];
+  lead: OscillatorType;
+  /** semicorcheas del compás donde suena el bajo */
+  bass: number[];
+  /** el arpegio suena cada `arp` semicorcheas */
+  arp: number;
+  kick: number[];
+  hat: number;
+  echo?: boolean;
+}
+
+interface Note {
+  step: number;
+  len: number;
+  /** grado de la escala */
+  deg: number;
+}
+/** 4 compases de notas */
+type Phrase = Note[][];
 
 /**
  * Cada mundo: tempo, tónica (MIDI), acordes (semitonos sobre la tónica), escala de la melodía,
  * ritmos posibles de la melodía (pasos de semicorchea [inicio, duración]) y estilo de acompañamiento.
  */
-const SONGS = {
+const SONGS: Record<string, Song> = {
   // Pradera: alegre y saltarina, en Re mayor (I–IV–vi–V)
   meadow: {
     bpm: 124, root: 62, swing: 0.08,
@@ -259,7 +298,7 @@ const SONGS = {
   },
 };
 
-function rng(seed) {
+function rng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -270,10 +309,10 @@ function rng(seed) {
 }
 
 /** Inventa una frase de 4 compases: lista de notas por compás (grado de la escala) */
-function makePhrase(song, rand) {
+function makePhrase(song: Song, rand: () => number): Phrase {
   const n = song.scale.length;
   let deg = n + Math.floor(rand() * n);
-  const bars = [];
+  const bars: Phrase = [];
   for (let b = 0; b < 4; b++) {
     if (b === 2 && rand() < 0.2) {
       bars.push([]); // compás de respiro
@@ -293,7 +332,8 @@ function makePhrase(song, rand) {
   return bars;
 }
 
-function voice(midi, t, dur, { type = 'square', vol = 0.1, attack = 0.005 } = {}) {
+function voice(midi: number, t: number, dur: number, { type = 'square', vol = 0.1, attack = 0.005 }: { type?: OscillatorType; vol?: number; attack?: number } = {}) {
+  if (!ctx) return;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
@@ -307,7 +347,8 @@ function voice(midi, t, dur, { type = 'square', vol = 0.1, attack = 0.005 } = {}
   o.stop(t + dur + 0.02);
 }
 
-function drum(t, kind) {
+function drum(t: number, kind: 'kick' | 'hat') {
+  if (!ctx) return;
   if (kind === 'kick') {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
@@ -336,15 +377,40 @@ function drum(t, kind) {
 
 const LOOKAHEAD = 0.15;
 
-export const music = {
+interface MusicPlayer {
+  theme: string | null;
+  timer: ReturnType<typeof setInterval> | null;
+  song: Song | null;
+  step: number;
+  bar: number;
+  nextTime: number;
+  /** [frase A, frase B] */
+  phrases: Phrase[];
+  /** orden de las frases: A A B A */
+  order: number[];
+  pendingSong: boolean;
+  rand: () => number;
+  play(theme: string): void;
+  stop(): void;
+  ensureRunning(): void;
+  setPaused(on: boolean): void;
+  duck(sec?: number): void;
+  newSong(): void;
+  schedule(): void;
+  playStep(t: number): void;
+}
+
+export const music: MusicPlayer = {
   theme: null,
   timer: null,
   song: null,
   step: 0,
   bar: 0,
   nextTime: 0,
-  phrases: null,
+  phrases: [],
   order: [0, 0, 1, 0],
+  pendingSong: false,
+  rand: Math.random,
 
   /** Elige la música de un mundo ('day' | 'sunset' | 'night'). Si ya suena, no se reinicia. */
   play(theme) {
@@ -358,7 +424,7 @@ export const music = {
 
   stop() {
     this.theme = null;
-    clearInterval(this.timer);
+    if (this.timer) clearInterval(this.timer);
     this.timer = null;
   },
 
@@ -389,7 +455,7 @@ export const music = {
   },
 
   newSong() {
-    const song = SONGS[this.theme];
+    const song = SONGS[this.theme ?? 'day'] ?? SONGS.day;
     this.song = song;
     this.rand = rng((Date.now() ^ (song.root * 7919)) >>> 0);
     this.phrases = [makePhrase(song, this.rand), makePhrase(song, this.rand)];
@@ -415,13 +481,14 @@ export const music = {
       if (this.step === 0) {
         this.bar++;
         // cada 16 compases (A A B A ×1) se inventa una frase B nueva
-        if (this.bar % 16 === 0) this.phrases[1] = makePhrase(this.song, this.rand);
+        if (this.bar % 16 === 0 && this.song) this.phrases[1] = makePhrase(this.song, this.rand);
       }
     }
   },
 
   playStep(t) {
     const s = this.song;
+    if (!s) return;
     const st = this.step;
     const sixteenth = 60 / s.bpm / 4;
     const chord = s.chords[this.bar % s.chords.length];

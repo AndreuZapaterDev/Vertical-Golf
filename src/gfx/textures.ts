@@ -1,17 +1,22 @@
 import Phaser from 'phaser';
-import { THEMES } from '../constants.js';
-import { SKINS } from '../data/upgrades.js';
+import { THEMES } from '../constants';
+import { SKINS } from '../data/upgrades';
+import { canvasTexture } from './terrain';
 
 /**
  * Sprites e interfaz en pixel art generados por código.
- * El terreno se pinta aparte (gfx/terrain.js).
+ * El terreno se pinta aparte (gfx/terrain.ts).
  * Si más adelante usas sprites dibujados a mano, cárgalos en BootScene con la misma clave:
  * make() no sobrescribe texturas existentes.
  */
 
-function make(scene, key, w, h, draw, linear = false) {
+type Ctx = CanvasRenderingContext2D;
+/** píxel a píxel: devuelve un color CSS o null/'' para dejarlo vacío */
+type PixelFn = (x: number, y: number) => string | null | undefined | false | 0;
+
+function make(scene: Phaser.Scene, key: string, w: number, h: number, draw: (c: Ctx, w: number, h: number) => void, linear = false) {
   if (scene.textures.exists(key)) return key;
-  const tex = scene.textures.createCanvas(key, w, h);
+  const tex = canvasTexture(scene, key, w, h);
   const c = tex.getContext();
   c.imageSmoothingEnabled = false;
   draw(c, w, h);
@@ -20,9 +25,9 @@ function make(scene, key, w, h, draw, linear = false) {
   return key;
 }
 
-function makeFrames(scene, key, fw, fh, n, draw) {
+function makeFrames(scene: Phaser.Scene, key: string, fw: number, fh: number, n: number, draw: (c: Ctx, i: number) => void) {
   if (scene.textures.exists(key)) return key;
-  const tex = scene.textures.createCanvas(key, fw * n, fh);
+  const tex = canvasTexture(scene, key, fw * n, fh);
   const c = tex.getContext();
   c.imageSmoothingEnabled = false;
   for (let i = 0; i < n; i++) {
@@ -39,29 +44,29 @@ function makeFrames(scene, key, fw, fh, n, draw) {
   return key;
 }
 
-const px = (c, x, y, col) => {
+const px = (c: Ctx, x: number, y: number, col: string) => {
   c.fillStyle = col;
   c.fillRect(x, y, 1, 1);
 };
-const rect = (c, x, y, w, h, col) => {
+const rect = (c: Ctx, x: number, y: number, w: number, h: number, col: string) => {
   c.fillStyle = col;
   c.fillRect(x, y, w, h);
 };
 
-function mask(c, w, h, fn, outline) {
-  const grid = new Array(w * h);
+function mask(c: Ctx, w: number, h: number, fn: PixelFn, outline?: string | null) {
+  const grid: ReturnType<PixelFn>[] = new Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) grid[y * w + x] = fn(x, y);
-  const inside = (x, y) => x >= 0 && y >= 0 && x < w && y < h && grid[y * w + x];
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && grid[y * w + x];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const col = grid[y * w + x];
-      if (col) px(c, x, y, col);
+      if (typeof col === 'string' && col) px(c, x, y, col);
       else if (outline && (inside(x - 1, y) || inside(x + 1, y) || inside(x, y - 1) || inside(x, y + 1))) px(c, x, y, outline);
     }
   }
 }
 
-function bitmap(c, x, y, rows, pal) {
+function bitmap(c: Ctx, x: number, y: number, rows: string[], pal: Record<string, string | undefined>) {
   rows.forEach((row, j) => {
     for (let i = 0; i < row.length; i++) {
       const col = pal[row[i]];
@@ -70,7 +75,7 @@ function bitmap(c, x, y, rows, pal) {
   });
 }
 
-function inPoly(pts, x, y) {
+function inPoly(pts: [number, number][], x: number, y: number) {
   let ins = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const [xi, yi] = pts[i];
@@ -80,13 +85,13 @@ function inPoly(pts, x, y) {
   return ins;
 }
 
-function radial(c, x, y, r, stops) {
+function radial(c: Ctx, x: number, y: number, r: number, stops: [number, string][]) {
   const g = c.createRadialGradient(x, y, 0, x, y, r);
   stops.forEach(([o, col]) => g.addColorStop(o, col));
   return g;
 }
 
-export function generateTextures(scene) {
+export function generateTextures(scene: Phaser.Scene) {
   // --- suaves
   make(scene, 'glow', 64, 64, (c) => {
     c.fillStyle = radial(c, 32, 32, 32, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(255,255,255,0.5)'], [1, 'rgba(255,255,255,0)']]);
@@ -152,7 +157,7 @@ export function generateTextures(scene) {
   );
 
   // iconos de las mejoras (13×13)
-  const icon = (key, rows, pal) => make(scene, key, 13, 13, (c) => bitmap(c, 0, 0, rows, { o: '#35282c', ...pal }));
+  const icon = (key: string, rows: string[], pal: Record<string, string>) => make(scene, key, 13, 13, (c) => bitmap(c, 0, 0, rows, { o: '#35282c', ...pal }));
   icon('up-power', [
     '......ooo....', '.....oyyo....', '....oyyo.....', '...oyyo......', '..oyyyyyyo...', '.oyyyyyyo....', '....oyyo.....',
     '...oyyo......', '..oyyo.......', '.oyyo........', 'oyyo.........', 'ooo..........', '.............',
@@ -333,14 +338,14 @@ export function generateTextures(scene) {
 // ------------------------------------------------------------------ cielo y fondo lejano
 
 /** Mezcla dos colores '#rrggbb' (k=0 → a, k=1 → b) */
-function mix(a, b, k) {
+function mix(a: string, b: string, k: number) {
   const pa = parseInt(a.slice(1), 16);
   const pb = parseInt(b.slice(1), 16);
-  const ch = (s) => Math.round(((pa >> s) & 255) * (1 - k) + ((pb >> s) & 255) * k);
+  const ch = (s: number) => Math.round(((pa >> s) & 255) * (1 - k) + ((pb >> s) & 255) * k);
   return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
 }
 
-function generateSky(scene) {
+function generateSky(scene: Phaser.Scene) {
   // Colinas lejanas (dos capas por mundo) para el parallax del inicio de cada hoyo
   for (const [k, T] of Object.entries(THEMES)) {
     const darkness = T.hillsDark || [0.14, 0.26];
@@ -412,7 +417,7 @@ function generateSky(scene) {
 
 // ------------------------------------------------------------------ pradera (campo de golf)
 
-function generateMeadow(scene) {
+function generateMeadow(scene: Phaser.Scene) {
   const o = '#2f2a2c';
   // árbol redondo (copa con brillos) 22×28
   make(scene, 'tree-round', 22, 28, (c) => {
@@ -465,7 +470,12 @@ function generateMeadow(scene) {
 
 // ------------------------------------------------------------------ interfaz
 
-function frame(scene, key, size, { outline, light, dark, fill, stud }) {
+function frame(
+  scene: Phaser.Scene,
+  key: string,
+  size: number,
+  { outline, light, dark, fill, stud }: { outline: string; light: string; dark: string; fill: string; stud?: string },
+) {
   make(scene, key, size, size, (c) => {
     const s = size;
     rect(c, 1, 0, s - 2, s, outline);
@@ -477,7 +487,7 @@ function frame(scene, key, size, { outline, light, dark, fill, stud }) {
   });
 }
 
-function button9(scene, key, face, light, dark, lip) {
+function button9(scene: Phaser.Scene, key: string, face: string, light: string, dark: string, lip: string) {
   make(scene, key, 16, 18, (c) => {
     rect(c, 1, 0, 14, 18, '#35282c');
     rect(c, 0, 1, 16, 16, '#35282c');
@@ -490,7 +500,7 @@ function button9(scene, key, face, light, dark, lip) {
   });
 }
 
-const ICONS = {
+const ICONS: Record<string, string[]> = {
   home: ['....x....', '...xxx...', '..xxxxx..', '.xxxxxxx.', 'xxxxxxxxx', '.xx...xx.', '.xx.x.xx.', '.xx.x.xx.', '.xxxxxxx.'],
   restart: ['..xxxx.x.', '.xx..xxx.', 'xx...xxx.', 'x........', 'x.......x', 'x.......x', 'xx.....xx', '.xx...xx.', '..xxxxx..'],
   sound: ['....x....', '...xx..x.', 'xxxxx...x', 'xxxxx.x.x', 'xxxxx.x.x', 'xxxxx...x', '...xx..x.', '....x....', '.........'],
@@ -500,7 +510,7 @@ const ICONS = {
   gear: ['...x.x...', '.x.xxx.x.', '..xxxxx..', 'xxxx.xxxx', '.xx...xx.', 'xxxx.xxxx', '..xxxxx..', '.x.xxx.x.', '...x.x...'],
 };
 
-function generateUi(scene) {
+function generateUi(scene: Phaser.Scene) {
   frame(scene, 'panel9', 12, { outline: '#35282c', light: '#fff4dc', dark: '#c8834f', fill: 'rgba(58,40,44,0.94)', stud: '#f2b43a' });
   frame(scene, 'hud9', 8, { outline: '#35282c', light: '#fff4dc', dark: '#b47143', fill: 'rgba(58,40,44,0.88)' });
   button9(scene, 'btn9-green', '#72d454', '#b4f282', '#4aa947', '#2c7a3a');
@@ -513,13 +523,14 @@ function generateUi(scene) {
 
   for (const [name, rows] of Object.entries(ICONS)) make(scene, `icon-${name}`, 9, 9, (c) => bitmap(c, 0, 0, rows, { x: '#35282c' }));
 
-  for (const [key, size, empty] of [
+  const stars: [string, number, boolean][] = [
     ['star', 23, false],
     ['star-empty', 23, true],
     ['star-sm', 9, false],
     ['star-sm-empty', 9, true],
-  ]) {
-    const pts = [];
+  ];
+  for (const [key, size, empty] of stars) {
+    const pts: [number, number][] = [];
     for (let i = 0; i < 10; i++) {
       const r = i % 2 ? size / 4.4 : size / 2 - 0.5;
       const a = (i * Math.PI) / 5 - Math.PI / 2;

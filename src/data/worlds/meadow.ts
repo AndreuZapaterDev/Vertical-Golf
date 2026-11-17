@@ -1,6 +1,6 @@
 /**
  * Mundo 1 · Pradera (el campo de golf). 9 hoyos.
- * Leyenda de los mapas en data/levels.js. El césped bajo el hoyo se convierte solo en "green".
+ * Leyenda de los mapas en data/levels.ts. El césped bajo el hoyo se convierte solo en "green".
  *
  * Todos son hoyos abiertos (`open: true`): islas flotantes sin paredes ni suelo, más anchas que la pantalla
  * (la cámara sigue a la bola en horizontal). Si la bola cae por un borde, es fuera de límites:
@@ -12,7 +12,9 @@
  *  - hay islitas laterales con gemas: más riesgo (caerse al vacío) a cambio de premio
  *  - par = golpes mínimos del simulador + 1 (+2 con plataformas móviles o viento)
  */
-export const MEADOW = [
+import type { LevelDef } from '../levels';
+
+export const MEADOW: LevelDef[] = [
   {
     // Islas en zigzag. La islita de la derecha guarda una gema, pero si te pasas, te caes.
     name: 'El tee', par: 6, open: true, tutorial: true,

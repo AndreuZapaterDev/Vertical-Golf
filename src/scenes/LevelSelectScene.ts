@@ -1,23 +1,27 @@
-import { transitionTo } from './TransitionScene.js';
+import { transitionTo } from './TransitionScene';
 import Phaser from 'phaser';
-import { W, H, PAL, TILE } from '../constants.js';
-import { Background } from '../gfx/background.js';
-import { renderTerrain } from '../gfx/terrain.js';
-import { LEVELS } from '../data/levels.js';
-import { worldById } from '../data/worlds.js';
-import { progress } from '../systems/progress.js';
-import { sfx, music } from '../systems/audio.js';
-import { fitCamera } from '../ui/camera.js';
-import { label, iconButton, panel } from '../ui/widgets.js';
+import { W, H, PAL, TILE } from '../constants';
+import { Background } from '../gfx/background';
+import { renderTerrain } from '../gfx/terrain';
+import { LEVELS } from '../data/levels';
+import { WORLDS, worldById, type WorldDef } from '../data/worlds';
+import { tintFill } from '../gfx/tint';
+import { progress } from '../systems/progress';
+import { sfx, music } from '../systems/audio';
+import { fitCamera } from '../ui/camera';
+import { label, iconButton, panel } from '../ui/widgets';
 
 /** Hoyos de un mundo (rejilla de 3×3) */
 export default class LevelSelectScene extends Phaser.Scene {
+  world!: WorldDef;
+  bg!: Background;
+
   constructor() {
     super('LevelSelect');
   }
 
-  init(data) {
-    this.world = worldById(data?.world) || worldById(LEVELS[progress.nextLevelIndex()].world);
+  init(data?: { world?: string }) {
+    this.world = worldById(data?.world ?? '') || worldById(LEVELS[progress.nextLevelIndex()].world) || WORLDS[0];
   }
 
   create() {
@@ -30,7 +34,7 @@ export default class LevelSelectScene extends Phaser.Scene {
     const grid = wd.preview.map((r) => (r + r.slice(-1).repeat(20 - r.length)).split(''));
     const tk = renderTerrain(this, `holes-terrain-${wd.id}`, grid, wd.theme);
     const gy = H - grid.length * TILE;
-    this.add.image(3, gy + 4, tk).setOrigin(0).setTintFill(0x1a1020).setAlpha(0.16);
+    tintFill(this.add.image(3, gy + 4, tk), 0x1a1020).setOrigin(0).setAlpha(0.16);
     this.add.image(0, gy, tk).setOrigin(0);
 
     label(this, W / 2, 22, wd.name.toUpperCase(), 22, { weight: '700', color: PAL.sand, strokeThickness: 4 });
@@ -81,12 +85,12 @@ export default class LevelSelectScene extends Phaser.Scene {
     });
   }
 
-  go(key, data) {
+  go(key: string, data?: object) {
     sfx.whoosh();
     transitionTo(this, () => this.scene.start(key, data));
   }
 
-  update(_, delta) {
+  update(_: number, delta: number) {
     this.bg.update(delta / 1000);
   }
 }

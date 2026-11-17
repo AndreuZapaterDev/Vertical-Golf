@@ -34,13 +34,26 @@ export const PAL = {
   gold: '#f2b43a',
 };
 
-export const hex = (s) => parseInt(s.slice(1), 16);
+export const hex = (s: string): number => parseInt(s.slice(1), 16);
 
 /**
  * Materiales: fricción/rebote de Matter, amortiguación al rodar (damp),
  * multiplicador de potencia del golpe y color del polvo.
  */
-export const MATERIALS = {
+export type MaterialKey = 'grass' | 'rough' | 'sand' | 'ice' | 'wood' | 'mushroom' | 'crumble' | 'bounds';
+
+export interface Material {
+  friction: number;
+  restitution: number;
+  /** amortiguación al rodar (cuanto más alta, antes frena) */
+  damp: number;
+  /** multiplicador de potencia del golpe desde este suelo */
+  power: number;
+  /** color del polvo al botar */
+  dust: number;
+}
+
+export const MATERIALS: Record<MaterialKey, Material> = {
   grass: { friction: 0.6, restitution: 0.3, damp: 3, power: 1, dust: hex('#a9f07a') },
   rough: { friction: 0.9, restitution: 0.08, damp: 9, power: 0.8, dust: hex('#3f9a3c') },
   sand: { friction: 0.9, restitution: 0, damp: 14, power: 0.75, dust: hex('#f2d083') },
@@ -58,7 +71,39 @@ export const MATERIALS = {
  *   decor    decoración sobre la hierba: 'day' | 'night' | 'meadow' (árboles, arbustos, vallas)
  *   mow      franjas de césped cortado (campo de golf)
  */
-export const THEMES = {
+export interface Theme {
+  bgA: string;
+  bgB: string;
+  outline: string;
+  dirt: string;
+  stripe: string;
+  dirtLight: string;
+  grassHi: string;
+  grass: string;
+  grassDark: string;
+  grassLine: string;
+  grassAlt?: string;
+  greenHi?: string;
+  green?: string;
+  greenAlt?: string;
+  roughHi?: string;
+  rough?: string;
+  roughDark?: string;
+  water: string;
+  waterHi: string;
+  waterMid: string;
+  sky: 'day' | 'sunset' | 'night';
+  cloudTint?: number;
+  cloudAlpha?: number;
+  ambient: 'leaf' | 'petal' | 'firefly';
+  decor: 'day' | 'night' | 'meadow';
+  mow?: boolean;
+  hillsDark?: [number, number];
+}
+
+export type ThemeKey = 'meadow' | 'beach' | 'swamp' | 'day' | 'sunset' | 'night';
+
+export const THEMES: Record<ThemeKey, Theme> = {
   meadow: {
     bgA: '#a6dcf7', bgB: '#90cdf0',
     outline: '#2f2a2c', dirt: '#c08552', stripe: '#a86f43', dirtLight: '#d89d68',

@@ -1,22 +1,32 @@
 import Phaser from 'phaser';
-import { W, H, PAL } from '../constants.js';
-import { Background } from '../gfx/background.js';
-import { UPGRADES, SKINS } from '../data/upgrades.js';
-import { progress } from '../systems/progress.js';
-import { sfx } from '../systems/audio.js';
-import { fitCamera } from '../ui/camera.js';
-import { label, makeButton, iconButton, panel } from '../ui/widgets.js';
-import { transitionTo } from './TransitionScene.js';
+import { W, H, PAL } from '../constants';
+import { Background } from '../gfx/background';
+import { UPGRADES, SKINS } from '../data/upgrades';
+import { progress } from '../systems/progress';
+import { sfx } from '../systems/audio';
+import { fitCamera } from '../ui/camera';
+import { label, makeButton, iconButton, panel } from '../ui/widgets';
+import { transitionTo } from './TransitionScene';
 
 const CREAM = '#f0dcc0';
 
 /** Tienda: mejoras de la cuenta (habilidades) y bolas */
+type Tab = 'upgrades' | 'skins';
+
 export default class ShopScene extends Phaser.Scene {
+  back = 'Menu';
+  tab: Tab = 'upgrades';
+  bg!: Background;
+  coinText!: Phaser.GameObjects.Text;
+  tabs!: Record<Tab, Phaser.GameObjects.Container>;
+  content!: Phaser.GameObjects.Container;
+  sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
+
   constructor() {
     super('Shop');
   }
 
-  init(data) {
+  init(data?: { back?: string; tab?: Tab }) {
     this.back = data?.back || 'Menu';
     this.tab = data?.tab || 'upgrades';
   }
@@ -46,7 +56,7 @@ export default class ShopScene extends Phaser.Scene {
     this.show(this.tab);
   }
 
-  show(tab) {
+  show(tab: Tab) {
     this.tab = tab;
     for (const [k, b] of Object.entries(this.tabs)) b.setAlpha(k === tab ? 1 : 0.55);
     this.content.removeAll(true);
@@ -55,7 +65,7 @@ export default class ShopScene extends Phaser.Scene {
     else this.buildSkins();
   }
 
-  flash(x, y) {
+  flash(x: number, y: number) {
     this.sparks.explode(12, x, y);
     this.tweens.add({ targets: this.coinText, scale: { from: 1.4, to: 1 }, duration: 250, ease: 'Back.easeOut' });
   }
@@ -106,7 +116,7 @@ export default class ShopScene extends Phaser.Scene {
           },
         });
         btn.add(this.add.image(-16, -2, 'coin'));
-        btn.list[1].x = 5;
+        (btn.list[1] as Phaser.GameObjects.Text).x = 5;
         card.add(btn);
       }
       card.setAlpha(0).setX(W / 2 + 12);
@@ -131,10 +141,15 @@ export default class ShopScene extends Phaser.Scene {
       }
       const ball = this.add.sprite(0, -22, `ball-${s.id}`, 0).setScale(3);
       c.add(ball);
-      this.tweens.addCounter({ from: 0, to: 4, duration: 900, repeat: -1, onUpdate: (t) => ball.active && ball.setFrame(Math.floor(t.getValue()) % 4) });
+      this.tweens.addCounter({
+        from: 0, to: 4, duration: 900, repeat: -1,
+        onUpdate: (t) => {
+          if (ball.active) ball.setFrame(Math.floor(t.getValue() ?? 0) % 4);
+        },
+      });
       c.add(label(this, 0, 14, s.name, 11, { color: equipped ? PAL.sand : '#ffffff' }));
 
-      let btn;
+      let btn: Phaser.GameObjects.Container;
       if (equipped) btn = makeButton(this, 0, 38, { color: 'gold', w: 56, h: 22, text: 'Usando', size: 10 });
       else if (owned) {
         btn = makeButton(this, 0, 38, { color: 'blue', w: 56, h: 22, text: 'Usar', size: 10, onClick: () => {
@@ -155,7 +170,7 @@ export default class ShopScene extends Phaser.Scene {
           }
         } });
         btn.add(this.add.image(-14, -2, 'coin'));
-        btn.list[1].x = 5;
+        (btn.list[1] as Phaser.GameObjects.Text).x = 5;
       }
       c.add(btn);
       c.setScale(0.8).setAlpha(0);
@@ -165,7 +180,7 @@ export default class ShopScene extends Phaser.Scene {
     this.content.add(label(this, W / 2, 380, 'Cada bola deja una estela de su color', 9, { color: CREAM, strokeThickness: 2 }));
   }
 
-  update(_, delta) {
+  update(_: number, delta: number) {
     this.bg.update(delta / 1000);
   }
 }

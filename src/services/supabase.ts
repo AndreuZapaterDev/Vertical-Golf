@@ -12,7 +12,7 @@ export const supabase = url && anonKey ? createClient(url, anonKey) : null;
 export const isSupabaseEnabled = supabase !== null;
 
 /** Guarda una puntuación en la tabla `scores` (ver supabase/schema.sql). */
-export async function saveScore({ level, strokes }) {
+export async function saveScore({ level, strokes }: { level: number; strokes: number }) {
   if (!supabase) {
     console.info('[supabase] no configurado, puntuación no guardada', { level, strokes });
     return null;
@@ -23,7 +23,7 @@ export async function saveScore({ level, strokes }) {
 }
 
 /** Devuelve las mejores puntuaciones de un nivel. */
-export async function getTopScores(level, limit = 10) {
+export async function getTopScores(level: number, limit = 10) {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('scores')

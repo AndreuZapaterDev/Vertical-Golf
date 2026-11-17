@@ -1,4 +1,5 @@
-import { TILE, THEMES } from '../constants.js';
+import type Phaser from 'phaser';
+import { TILE, THEMES, type Theme, type ThemeKey } from '../constants';
 
 /**
  * Pintor de terreno: convierte la rejilla del nivel en una única textura pixel art
@@ -7,22 +8,25 @@ import { TILE, THEMES } from '../constants.js';
 
 const T = TILE;
 
-function rgb(hexStr, a = 255) {
+/** color [r, g, b, a] (0–255) */
+type RGBA = number[];
+
+function rgb(hexStr: string, a = 255): RGBA {
   const n = parseInt(hexStr.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255, a];
 }
 
-function hash(x, y, s = 0) {
+function hash(x: number, y: number, s = 0) {
   let n = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1442695041);
   n = Math.imul(n ^ (n >>> 13), 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
 }
 
 // 1 hierba · 2 arena · 3 hielo · 4 rough (hierba alta) · 5 green (alrededor del hoyo)
-const MAT_OF = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, i: 3, r: 4, G: 5 };
+const MAT_OF: Record<string, number> = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, i: 3, r: 4, G: 5 };
 
 /** ¿El píxel (lx,ly) de una casilla con este carácter es sólido? */
-export function cellSolid(ch, lx, ly) {
+export function cellSolid(ch: string | undefined, lx: number, ly: number): boolean {
   switch (ch) {
     case '#':
     case 's':
@@ -44,10 +48,18 @@ export function cellSolid(ch, lx, ly) {
 const SAND = { hi: rgb('#fff0b0'), base: rgb('#f2d083'), dark: rgb('#d9ad5e') };
 const ICE = { hi: rgb('#ffffff'), light: rgb('#d6f5ff'), base: rgb('#a8e2f5'), dark: rgb('#7cc6ea'), shine: rgb('#e8fbff') };
 const BUMP = [0, 1, 2, 2, 1, 0, 0, 0];
-const lighten = (c, k) => [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k, 255].map(Math.round);
+const lighten = (c: RGBA, k: number): RGBA => [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k, 255].map(Math.round);
+
+type Palette = Record<string, RGBA>;
+interface Edges {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
 
 /** Piedras incrustadas en la tierra, con los tonos del propio mundo */
-function rockAt(x, y, C) {
+function rockAt(x: number, y: number, C: Palette): RGBA | null {
   const cx = Math.floor(x / 22);
   const cy = Math.floor(y / 16);
   if (hash(cx, cy, 21) > 0.13) return null;
@@ -66,7 +78,16 @@ function rockAt(x, y, C) {
  * Pinta píxeles a partir de funciones de máscara.
  * solidAt(x,y) → 0 (vacío) | 1 hierba | 2 arena | 3 hielo ; waterAt(x,y) → bool ; round(x,y) → si se pueden redondear esquinas
  */
-function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, right: 1, top: 0, bottom: 1 }) {
+function paint(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  P: Theme,
+  solidAt: (x: number, y: number) => number,
+  waterAt: (x: number, y: number) => boolean,
+  canRound: (x: number, y: number) => boolean,
+  edgeSolid: Edges = { left: 1, right: 1, top: 0, bottom: 1 },
+) {
   const raw = new Uint8Array(w * h);
   const water = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
@@ -75,7 +96,7 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
       water[y * w + x] = waterAt(x, y) ? 1 : 0;
     }
   }
-  const S0 = (x, y) => {
+  const S0 = (x: number, y: number) => {
     if (x < 0) return edgeSolid.left;
     if (x >= w) return edgeSolid.right;
     if (y < 0) return edgeSolid.top;
@@ -94,16 +115,16 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
       if ((u && l) || (u && r) || (d && l) || (d && r)) solid[y * w + x] = 0;
     }
   }
-  const S = (x, y) => {
+  const S = (x: number, y: number) => {
     if (x < 0) return edgeSolid.left;
     if (x >= w) return edgeSolid.right;
     if (y < 0) return edgeSolid.top;
     if (y >= h) return edgeSolid.bottom;
     return solid[y * w + x];
   };
-  const Wt = (x, y) => x >= 0 && y >= 0 && x < w && y < h && water[y * w + x];
+  const Wt = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && water[y * w + x];
 
-  const C = {
+  const C: Palette = {
     outline: rgb(P.outline), dirt: rgb(P.dirt), stripe: rgb(P.stripe), dirtLight: rgb(P.dirtLight),
     grassHi: rgb(P.grassHi), grass: rgb(P.grass), grassDark: rgb(P.grassDark), grassLine: rgb(P.grassLine),
     water: rgb(P.water, 225), waterHi: rgb(P.waterHi, 235), waterMid: rgb(P.waterMid, 230),
@@ -117,14 +138,14 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
   C.rough = rgb(P.rough || P.grassDark);
   C.roughDark = rgb(P.roughDark || P.grassLine);
   // franjas de césped cortado: bandas de 6 px que alternan tono (como un fairway)
-  const mow = (x) => P.mow && Math.floor(x / 6) % 2 === 1;
+  const mow = (x: number) => P.mow && Math.floor(x / 6) % 2 === 1;
 
   const img = ctx.createImageData(w, h);
   const data = img.data;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      let col = null;
+      let col: RGBA | null = null;
       const m = solid[i];
       if (m) {
         const edge = !S(x - 1, y) || !S(x + 1, y) || !S(x, y - 1) || !S(x, y + 1);
@@ -203,17 +224,24 @@ function paint(ctx, w, h, P, solidAt, waterAt, canRound, edgeSolid = { left: 1, 
   ctx.putImageData(img, 0, 0);
 }
 
+/** Crea una textura de canvas (falla con un error claro si la clave ya existe) */
+export function canvasTexture(scene: Phaser.Scene, key: string, w: number, h: number): Phaser.Textures.CanvasTexture {
+  const tex = scene.textures.createCanvas(key, w, h);
+  if (!tex) throw new Error(`No se pudo crear la textura '${key}'`);
+  return tex;
+}
+
 /** Textura con todo el terreno de un nivel */
-export function renderTerrain(scene, key, grid, themeKey, { open = false } = {}) {
+export function renderTerrain(scene: Phaser.Scene, key: string, grid: string[][], themeKey: ThemeKey, { open = false } = {}) {
   if (scene.textures.exists(key)) scene.textures.remove(key);
   const rows = grid.length;
   const cols = grid[0].length;
   const w = cols * T;
   const h = rows * T;
-  const tex = scene.textures.createCanvas(key, w, h);
+  const tex = canvasTexture(scene, key, w, h);
   // en los hoyos abiertos, fuera del mapa hay vacío (las islas llevan contorno por todos lados)
   const outside = open ? '.' : '#';
-  const cell = (x, y) => grid[Math.floor(y / T)]?.[Math.floor(x / T)] ?? outside;
+  const cell = (x: number, y: number) => grid[Math.floor(y / T)]?.[Math.floor(x / T)] ?? outside;
   paint(
     tex.getContext(),
     w,
@@ -235,9 +263,9 @@ export function renderTerrain(scene, key, grid, themeKey, { open = false } = {})
 }
 
 /** Bloque suelto (plataforma móvil, bloque frágil) con el mismo estilo */
-export function renderBlock(scene, key, w, h, themeKey, kind = 'grass') {
+export function renderBlock(scene: Phaser.Scene, key: string, w: number, h: number, themeKey: ThemeKey, kind: 'grass' | 'crumble' | 'wood' = 'grass') {
   if (scene.textures.exists(key)) return key;
-  const tex = scene.textures.createCanvas(key, w, h);
+  const tex = canvasTexture(scene, key, w, h);
   const ctx = tex.getContext();
   const P = THEMES[themeKey];
   paint(ctx, w, h, P, () => 1, () => false, () => true, { left: 0, right: 0, top: 0, bottom: 0 });

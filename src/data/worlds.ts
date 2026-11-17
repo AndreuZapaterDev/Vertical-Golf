@@ -1,4 +1,19 @@
-import { MEADOW } from './worlds/meadow.js';
+import { MEADOW } from './worlds/meadow';
+import type { ThemeKey } from '../constants';
+import type { LevelDef } from './levels';
+
+export interface WorldDef {
+  id: string;
+  name: string;
+  tagline: string;
+  theme: ThemeKey;
+  /** color de los botones de sus hoyos */
+  button: 'green' | 'gold' | 'blue' | 'purple' | 'orange';
+  /** mini-escenario que se pinta en la tarjeta del mapa de mundos */
+  preview: string[];
+  levels: LevelDef[];
+  comingSoon?: boolean;
+}
 
 /**
  * Mundos del juego, en orden. Cada uno tiene su tema visual (constants.js → THEMES),
@@ -8,7 +23,7 @@ import { MEADOW } from './worlds/meadow.js';
  *   preview  mini-escenario (20 columnas) que se pinta en la tarjeta del mapa de mundos
  *   button   color de los botones de sus hoyos ('green' | 'gold' | 'blue' | 'purple' | 'orange')
  */
-export const WORLDS = [
+export const WORLDS: WorldDef[] = [
   {
     id: 'meadow',
     name: 'Pradera',
@@ -40,4 +55,4 @@ export const WORLDS = [
   },
 ];
 
-export const worldById = (id) => WORLDS.find((w) => w.id === id);
+export const worldById = (id: string) => WORLDS.find((w) => w.id === id);

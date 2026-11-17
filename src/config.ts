@@ -1,13 +1,13 @@
 import Phaser from 'phaser';
-import { W, H, GRAVITY, VIEW } from './constants.js';
-import BootScene from './scenes/BootScene.js';
-import MenuScene from './scenes/MenuScene.js';
-import LevelSelectScene from './scenes/LevelSelectScene.js';
-import WorldSelectScene from './scenes/WorldSelectScene.js';
-import GameScene from './scenes/GameScene.js';
-import UIScene from './scenes/UIScene.js';
-import TransitionScene from './scenes/TransitionScene.js';
-import ShopScene from './scenes/ShopScene.js';
+import { W, H, GRAVITY, VIEW } from './constants';
+import BootScene from './scenes/BootScene';
+import MenuScene from './scenes/MenuScene';
+import LevelSelectScene from './scenes/LevelSelectScene';
+import WorldSelectScene from './scenes/WorldSelectScene';
+import GameScene from './scenes/GameScene';
+import UIScene from './scenes/UIScene';
+import TransitionScene from './scenes/TransitionScene';
+import ShopScene from './scenes/ShopScene';
 
 const debug = new URLSearchParams(window.location.search).has('debug');
 
@@ -15,19 +15,20 @@ const debug = new URLSearchParams(window.location.search).has('debug');
 const dpr = Math.min(window.devicePixelRatio || 1, 3);
 VIEW.Z = Phaser.Math.Clamp(Math.floor(Math.min((window.innerWidth * dpr) / W, (window.innerHeight * dpr) / H)), 2, 5);
 
-export const gameConfig = {
+export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
   width: W * VIEW.Z,
   height: H * VIEW.Z,
   backgroundColor: '#141a33',
   pixelArt: true,
+  // En Phaser 4 el valor por defecto pasó a false: lo fijamos para que el pixel art no tiemble
   roundPixels: true,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  audio: { noAudio: true }, // sonidos sintetizados en systems/audio.js
+  audio: { noAudio: true }, // sonidos sintetizados en systems/audio.ts
   physics: {
     default: 'matter',
     matter: {

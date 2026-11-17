@@ -1,13 +1,13 @@
-import { transitionTo } from './TransitionScene.js';
+import { transitionTo } from './TransitionScene';
 import Phaser from 'phaser';
-import { W, PAL } from '../constants.js';
-import { Background } from '../gfx/background.js';
-import { renderTerrain } from '../gfx/terrain.js';
-import { WORLDS } from '../data/worlds.js';
-import { progress } from '../systems/progress.js';
-import { sfx } from '../systems/audio.js';
-import { fitCamera } from '../ui/camera.js';
-import { label, iconButton, panel } from '../ui/widgets.js';
+import { W, PAL } from '../constants';
+import { Background } from '../gfx/background';
+import { renderTerrain } from '../gfx/terrain';
+import { WORLDS, type WorldDef } from '../data/worlds';
+import { progress } from '../systems/progress';
+import { sfx } from '../systems/audio';
+import { fitCamera } from '../ui/camera';
+import { label, iconButton, panel } from '../ui/widgets';
 
 const CARD_W = 220;
 const SKY_W = 204;
@@ -15,6 +15,8 @@ const SKY_H = 58;
 
 /** Mapa de mundos: una tarjeta por mundo con su paisaje en miniatura */
 export default class WorldSelectScene extends Phaser.Scene {
+  bg!: Background;
+
   constructor() {
     super('Worlds');
   }
@@ -30,7 +32,7 @@ export default class WorldSelectScene extends Phaser.Scene {
     WORLDS.forEach((wd, i) => this.card(wd, i, 112 + i * 108));
   }
 
-  card(wd, i, y) {
+  card(wd: WorldDef, i: number, y: number) {
     const unlocked = progress.isWorldUnlocked(i);
     const holes = wd.levels.length;
     const c = this.add.container(W / 2, y);
@@ -77,12 +79,12 @@ export default class WorldSelectScene extends Phaser.Scene {
     this.tweens.add({ targets: c, alpha: 1, x: W / 2, duration: 280, delay: 60 + i * 80, ease: 'Cubic.easeOut' });
   }
 
-  go(key, data) {
+  go(key: string, data?: object) {
     sfx.whoosh();
     transitionTo(this, () => this.scene.start(key, data));
   }
 
-  update(_, delta) {
+  update(_: number, delta: number) {
     this.bg.update(delta / 1000);
   }
 }

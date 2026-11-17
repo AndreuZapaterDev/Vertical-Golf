@@ -1,6 +1,6 @@
 # Vertical Golf
 
-Juego 2D hecho con **Phaser 3** + **Vite**, ejecutado en **Docker** y preparado para **Supabase**.
+Juego 2D hecho con **Phaser 4** + **TypeScript** + **Vite**, ejecutado en **Docker** y preparado para **Supabase**.
 
 ## Arrancar (desarrollo)
 
@@ -12,6 +12,9 @@ docker compose up --build
 Abre http://localhost:5173. Los cambios en `src/` se recargan solos.
 
 Si añades dependencias nuevas a `package.json`, reconstruye: `docker compose up --build -V`.
+
+Comprobar los tipos de TypeScript (Vite no lo hace al compilar): `npm run typecheck`
+(o `docker compose exec game npm run typecheck`).
 
 ## Producción
 
@@ -25,20 +28,20 @@ Abre http://localhost:8080 (nginx sirviendo el build estático).
 
 ```
 src/
-  main.js                 # punto de entrada (espera a la fuente Jersey 10)
-  config.js               # configuración de Phaser (zoom entero según la pantalla)
-  constants.js            # física, materiales y paletas de los mundos
-  data/worlds.js          # los mundos (Pradera, Playa, Pantano…) en orden
-  data/worlds/meadow.js   # los 9 hoyos de la Pradera, dibujados como mapas de texto
-  data/levels.js          # lista plana de hoyos + parser de mapas + textos de mecánicas
-  gfx/terrain.js          # pinta el terreno de un mapa como una sola textura pixel art
-  gfx/textures.js         # sprites e interfaz pixel art (bola, bandera, sierras, botones…)
-  gfx/background.js       # fondo de cuadros de los menús
-  systems/audio.js        # efectos de sonido sintetizados con WebAudio
-  systems/progress.js     # progreso guardado en localStorage
+  main.ts                 # punto de entrada (espera a la fuente Jersey 10)
+  config.ts               # configuración de Phaser (zoom entero según la pantalla)
+  constants.ts            # física, materiales y paletas de los mundos
+  data/worlds.ts          # los mundos (Pradera, Playa, Pantano…) en orden
+  data/worlds/meadow.ts   # los 9 hoyos de la Pradera, dibujados como mapas de texto
+  data/levels.ts          # lista plana de hoyos + parser de mapas + textos de mecánicas
+  gfx/terrain.ts          # pinta el terreno de un mapa como una sola textura pixel art
+  gfx/textures.ts         # sprites e interfaz pixel art (bola, bandera, sierras, botones…)
+  gfx/background.ts       # fondo de cuadros de los menús
+  systems/audio.ts        # efectos de sonido sintetizados con WebAudio
+  systems/progress.ts     # progreso guardado en localStorage
   ui/                     # textos, botones, paneles y cámara
   scenes/                 # Boot, Menu, Worlds (mapa de mundos), LevelSelect (hoyos), Game, UI
-  services/supabase.js    # cliente Supabase + saveScore / getTopScores
+  services/supabase.ts    # cliente Supabase + saveScore / getTopScores
 supabase/schema.sql       # tabla `scores` con RLS
 ```
 
@@ -63,8 +66,8 @@ nueva, +10 bajo par y +25 por hoyo en uno. Se gastan en la tienda (**Mejoras**):
 | Salvavidas | Anula la penalización de agua/sierras, 1–2 por hoyo |
 | Imán de gemas | Las gemas cercanas vuelan hacia la bola |
 
-También hay 6 bolas comprables, cada una con su estela. Precios y valores en `src/data/upgrades.js`;
-el guardado (localStorage) en `src/systems/progress.js`.
+También hay 6 bolas comprables, cada una con su estela. Precios y valores en `src/data/upgrades.ts`;
+el guardado (localStorage) en `src/systems/progress.ts`.
 
 ## Mundos
 
@@ -80,9 +83,9 @@ Un mundo se desbloquea al completar todos los hoyos del anterior; dentro de un m
 abre al completar el anterior. El guardado va por id de hoyo (`meadow-3`), así que añadir hoyos o
 mundos no rompe el progreso. En Supabase cada hoyo se guarda como `mundo·100 + hoyo` (101, 102…).
 
-**Añadir un mundo:** crea `src/data/worlds/<id>.js` con sus hoyos, añádelo a `WORLDS` en
-`src/data/worlds.js`, define su paleta en `THEMES` (`src/constants.js`) y, si quieres, su canción
-en `SONGS` (`src/systems/audio.js`).
+**Añadir un mundo:** crea `src/data/worlds/<id>.ts` con sus hoyos, añádelo a `WORLDS` en
+`src/data/worlds.ts`, define su paleta en `THEMES` (`src/constants.ts`) y, si quieres, su canción
+en `SONGS` (`src/systems/audio.ts`).
 
 ## Crear o editar hoyos
 
@@ -140,8 +143,8 @@ El juego se pausa solo si cambias de pestaña o bloqueas el móvil.
 ## Ajustes
 
 Desde el engranaje del menú o desde la pausa: volumen de **música** y **efectos**, **vibración** (móviles)
-y **temblor** de cámara. Se guardan con el progreso (`src/systems/progress.js`), que valida los datos al
+y **temblor** de cámara. Se guardan con el progreso (`src/systems/progress.ts`), que valida los datos al
 cargar y mantiene una copia de seguridad en `localStorage`.
 
-La música se genera en tiempo real (`src/systems/audio.js`): cada mundo tiene su tempo, acordes y escala,
+La música se genera en tiempo real (`src/systems/audio.ts`): cada mundo tiene su tempo, acordes y escala,
 y la melodía se inventa por frases (A A B A) que van cambiando.

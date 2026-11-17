@@ -1,13 +1,15 @@
 import Phaser from 'phaser';
-import { W, H, PAL, hex, THEMES } from '../constants.js';
-import { MECHANICS } from '../data/levels.js';
-import { progress } from '../systems/progress.js';
-import { sfx, music } from '../systems/audio.js';
-import { fitCamera } from '../ui/camera.js';
-import { label, makeButton, iconButton, panel } from '../ui/widgets.js';
-import { openSettings } from '../ui/settings.js';
+import { W, H, PAL, hex, THEMES, type ThemeKey } from '../constants';
+import { MECHANICS } from '../data/levels';
+import { progress } from '../systems/progress';
+import { sfx, music } from '../systems/audio';
+import { fitCamera } from '../ui/camera';
+import { label, makeButton, iconButton, panel, stopEvent } from '../ui/widgets';
+import { openSettings, type SettingsPanel } from '../ui/settings';
+import type GameScene from './GameScene';
+import type { HudState, CompleteInfo, ToastOpts } from './GameScene';
 
-function scoreName(strokes, par) {
+function scoreName(strokes: number, par: number) {
   if (strokes === 1) return '¡HOYO EN UNO!';
   const d = strokes - par;
   if (d <= -3) return '¡ALBATROS!';
@@ -21,11 +23,38 @@ function scoreName(strokes, par) {
 
 /** HUD y ventanas superpuestas. Se comunica con GameScene a través de un EventEmitter (bus). */
 export default class UIScene extends Phaser.Scene {
+  bus!: Phaser.Events.EventEmitter;
+  gs!: GameScene;
+  info!: HudState;
+  toast: Phaser.GameObjects.Container | null = null;
+  paused = false;
+  pauseMenu: Phaser.GameObjects.Container | null = null;
+  settingsPanel: SettingsPanel | null = null;
+  /** qué hace ENTER en la ventana de fin de hoyo */
+  completeAction: (() => void) | null = null;
+  tutorial: Phaser.GameObjects.GameObject[] | null = null;
+  introCard: Phaser.GameObjects.Container | null = null;
+  onHidden!: () => void;
+
+  strokesText!: Phaser.GameObjects.Text;
+  gemIcons: Phaser.GameObjects.Image[] = [];
+  sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
+  shieldIcon?: Phaser.GameObjects.Image;
+  shieldText?: Phaser.GameObjects.Text;
+  brakeBtn?: Phaser.GameObjects.Container;
+  brakeText?: Phaser.GameObjects.Text;
+  brakeHint?: Phaser.GameObjects.Text;
+  barTop = 0;
+  barBot = 0;
+  barX = 0;
+  barFill!: Phaser.GameObjects.Graphics;
+  barBall!: Phaser.GameObjects.Sprite;
+
   constructor() {
     super('UI');
   }
 
-  init(data) {
+  init(data: { bus: Phaser.Events.EventEmitter; gameScene: GameScene }) {
     this.bus = data.bus;
     this.gs = data.gameScene;
     this.info = this.gs.getHudState();
@@ -34,6 +63,11 @@ export default class UIScene extends Phaser.Scene {
     this.pauseMenu = null;
     this.settingsPanel = null;
     this.completeAction = null;
+    this.tutorial = null;
+    this.introCard = null;
+    this.gemIcons = [];
+    this.shieldIcon = undefined;
+    this.brakeBtn = undefined;
   }
 
   create() {
@@ -131,13 +165,13 @@ export default class UIScene extends Phaser.Scene {
     const I = this.info;
     const c = this.add.container(W / 2, H / 2).setDepth(70);
     const blocker = this.add.rectangle(0, 0, W, H, hex('#35282c'), 0.55).setInteractive();
-    blocker.on('pointerdown', (_p, _x, _y, e) => e?.stopPropagation?.());
+    blocker.on('pointerdown', stopEvent);
     c.add(blocker);
     c.add(panel(this, 0, 0, 176, 210));
     c.add(label(this, 0, -84, 'PAUSA', 22, { weight: '700', color: PAL.sand, strokeThickness: 4 }));
     c.add(label(this, 0, -60, `${I.worldName} · Hoyo ${I.hole}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
     c.add(label(this, 0, -46, `Golpes ${this.gs.strokes} · Par ${I.par}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
-    const btn = (y, color, text, cb) => c.add(makeButton(this, 0, y, { color, w: 120, h: 26, text, size: 13, onClick: cb }));
+    const btn = (y: number, color: string, text: string, cb: () => void) => c.add(makeButton(this, 0, y, { color, w: 120, h: 26, text, size: 13, onClick: cb }));
     btn(-16, 'green', 'Continuar', () => this.resume());
     btn(16, 'blue', 'Reiniciar', () => this.gs.restartLevel());
     btn(48, 'gold', 'Ajustes', () => {
@@ -156,7 +190,7 @@ export default class UIScene extends Phaser.Scene {
     this.paused = false;
     const c = this.pauseMenu;
     this.pauseMenu = null;
-    this.tweens.add({ targets: c, alpha: 0, duration: 120, onComplete: () => c.destroy() });
+    if (c) this.tweens.add({ targets: c, alpha: 0, duration: 120, onComplete: () => c.destroy() });
     this.scene.resume('Game');
     music.setPaused(false);
     sfx.resume();
@@ -164,7 +198,7 @@ export default class UIScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- Habilidades
 
-  buildAbilities(I) {
+  buildAbilities(I: HudState) {
     // Salvavidas: icono + contador bajo las gemas
     if (I.shields > 0) {
       this.shieldIcon = this.add.image(12, 50, 'up-shield');
@@ -178,8 +212,8 @@ export default class UIScene extends Phaser.Scene {
       this.brakeText = label(this, 10, 6, `${I.brakes}`, 10, { strokeThickness: 2 });
       c.add([bg, ic, this.brakeText]);
       c.setSize(34, 30).setInteractive({ useHandCursor: true });
-      c.on('pointerdown', (p, lx, ly, e) => {
-        e?.stopPropagation?.();
+      c.on('pointerdown', (p: Phaser.Input.Pointer, lx: number, ly: number, e?: Phaser.Types.Input.EventData) => {
+        stopEvent(p, lx, ly, e);
         this.gs.useBrake();
       });
       this.brakeBtn = c;
@@ -187,35 +221,35 @@ export default class UIScene extends Phaser.Scene {
     }
   }
 
-  onBrake(n) {
+  onBrake(n: number) {
     if (!this.brakeBtn) return;
-    this.brakeText.setText(String(n));
+    this.brakeText?.setText(String(n));
     this.tweens.add({ targets: this.brakeBtn, scale: { from: 1.25, to: 1 }, duration: 200, ease: 'Back.easeOut' });
   }
 
-  onShield(n) {
+  onShield(n: number) {
     if (!this.shieldIcon) return;
-    this.shieldText.setText(`×${n}`);
+    this.shieldText?.setText(`×${n}`);
     this.tweens.add({ targets: this.shieldIcon, scale: { from: 1.8, to: 1 }, duration: 300, ease: 'Back.easeOut' });
     if (n === 0) this.shieldIcon.setAlpha(0.35);
   }
 
   update() {
     if (this.brakeBtn) {
-      const ok = this.gs.canBrake?.();
+      const ok = this.gs.canBrake();
       this.brakeBtn.setAlpha(ok ? 1 : this.gs.brakes > 0 ? 0.45 : 0.2);
-      this.brakeHint.setAlpha(ok ? 1 : 0);
+      this.brakeHint?.setAlpha(ok ? 1 : 0);
     }
   }
 
   /** Partículas ambientales: hojas (día), pétalos (atardecer), luciérnagas (noche) */
-  ambientFx(theme) {
+  ambientFx(theme: ThemeKey) {
     const kind = THEMES[theme]?.ambient || 'leaf';
     if (kind === 'firefly') {
       this.add.particles(0, 0, 'glow', {
         x: { min: 0, max: W }, y: { min: 60, max: H }, lifespan: 4000, speedX: { min: -6, max: 6 }, speedY: { min: -8, max: 3 },
         scale: { min: 0.06, max: 0.12 }, tint: 0xd8ff8a, blendMode: 'ADD', frequency: 450,
-        alpha: { onEmit: () => 0, onUpdate: (p, k, t) => Math.max(0, Math.sin(t * Math.PI * 3)) * Math.sin(t * Math.PI) },
+        alpha: { onEmit: () => 0, onUpdate: (_p: unknown, _k: string, t: number) => Math.max(0, Math.sin(t * Math.PI * 3)) * Math.sin(t * Math.PI) },
       });
       return;
     }
@@ -225,7 +259,7 @@ export default class UIScene extends Phaser.Scene {
     });
   }
 
-  windFx(wind) {
+  windFx(wind: number) {
     const dir = Math.sign(wind);
     const sp = Math.abs(wind) * 3;
     const common = { x: dir > 0 ? -16 : W + 16, y: { min: 40, max: H }, speedX: dir > 0 ? { min: sp, max: sp * 1.6 } : { min: -sp * 1.6, max: -sp } };
@@ -250,21 +284,21 @@ export default class UIScene extends Phaser.Scene {
     this.barBall = this.add.sprite(x, this.barBot, `ball-${progress.skin}`, 0);
   }
 
-  onProgress(t) {
+  onProgress(t: number) {
     const y = this.barBot - (this.barBot - this.barTop) * t;
     this.barBall.y = y;
     this.barFill.clear();
     if (this.barBot - y > 2) this.barFill.fillStyle(hex('#b8ec6a')).fillRoundedRect(this.barX - 1.5, y, 3, this.barBot - y, 1.5);
   }
 
-  onHud({ strokes }) {
+  onHud({ strokes }: { strokes: number; gems: number }) {
     if (this.strokesText.text !== String(strokes)) {
       this.strokesText.setText(String(strokes));
       this.tweens.add({ targets: this.strokesText, scale: { from: 1.6, to: 1 }, duration: 260, ease: 'Back.easeOut' });
     }
   }
 
-  onGem(count) {
+  onGem(count: number) {
     const icon = this.gemIcons[count - 1];
     if (!icon) return;
     icon.clearTint().setAlpha(1);
@@ -323,7 +357,7 @@ export default class UIScene extends Phaser.Scene {
     if (this.tutorial) {
       const t = this.tutorial;
       this.tutorial = null;
-      this.tweens.add({ targets: t, alpha: 0, duration: 250, onComplete: () => t.forEach((o) => o.destroy()) });
+      this.tweens.add({ targets: t, alpha: 0, duration: 250, onComplete: () => t.forEach((o: Phaser.GameObjects.GameObject) => o.destroy()) });
       // primer hoyo con islas: se explica qué pasa si te caes
       if (this.info.open) {
         const m = MECHANICS.edge;
@@ -332,7 +366,7 @@ export default class UIScene extends Phaser.Scene {
     }
   }
 
-  showToast({ title, text, color = PAL.sand, duration = 4000 }) {
+  showToast({ title, text, color = PAL.sand, duration = 4000 }: ToastOpts) {
     if (this.toast) this.toast.destroy();
     const c = this.add.container(W / 2, 58).setDepth(40);
     const body = label(this, 0, 0, text, 10, { wrap: 190, oy: 0, strokeThickness: 2 });
@@ -352,7 +386,7 @@ export default class UIScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- Fin de nivel
 
-  showComplete(r) {
+  showComplete(r: CompleteInfo) {
     if (this.toast) this.toast.destroy();
     const blocker = this.add.rectangle(W / 2, H / 2, W, H, hex('#35282c'), 0).setInteractive().setDepth(50);
     this.tweens.add({ targets: blocker, fillAlpha: 0.65, duration: 300 });
@@ -371,15 +405,15 @@ export default class UIScene extends Phaser.Scene {
     p.add(label(this, 0, -100, `${r.worldName} · Hoyo ${r.hole} · ${r.name}`, 10, { color: '#f0dcc0', strokeThickness: 2 }));
 
     const starPos = [[-38, -64], [0, -72], [38, -64]];
+    const starScale = (i: number) => (i === 1 ? 1.25 : 1);
     const stars = starPos.map(([sx, sy], i) => {
-      p.add(this.add.image(sx, sy, 'star-empty').setScale(i === 1 ? 1.25 : 1));
+      p.add(this.add.image(sx, sy, 'star-empty').setScale(starScale(i)));
       const s = this.add.image(sx, sy, 'star').setScale(0);
-      s.targetScale = i === 1 ? 1.25 : 1;
       p.add(s);
       return s;
     });
 
-    [['Golpes', r.strokes], ['Par', r.par], ['Gemas', `${r.gems}/${r.gemsTotal}`]].forEach(([k, v], i) => {
+    ([['Golpes', r.strokes], ['Par', r.par], ['Gemas', `${r.gems}/${r.gemsTotal}`]] as [string, string | number][]).forEach(([k, v], i) => {
       const x = -62 + i * 62;
       p.add(label(this, x, -32, k, 9, { color: '#f0dcc0', strokeThickness: 2 }));
       p.add(label(this, x, -15, String(v), 18, { weight: '700' }));
@@ -409,7 +443,7 @@ export default class UIScene extends Phaser.Scene {
     if (r.hasNext) p.add(makeButton(this, 46, 78, { color: 'green', w: 84, text: 'Siguiente', onClick: () => this.gs.goToLevel(r.levelIndex + 1) }));
     else p.add(makeButton(this, 46, 78, { color: 'green', w: 84, text: 'Hoyos', onClick: () => this.gs.goToHoles() }));
 
-    const link = (x, text, cb) => {
+    const link = (x: number, text: string, cb: () => void) => {
       const t = label(this, x, 108, text, 10, { color: '#f0dcc0' }).setInteractive({ useHandCursor: true });
       t.on('pointerup', () => {
         sfx.click();
@@ -427,7 +461,7 @@ export default class UIScene extends Phaser.Scene {
         to: r.coins,
         duration: Math.min(1200, 250 + r.coins * 12),
         onUpdate: (tw) => {
-          const v = Math.round(tw.getValue());
+          const v = Math.round(tw.getValue() ?? 0);
           if (coinText.text !== `+${v}`) {
             coinText.setText(`+${v}`);
             if (v % 3 === 0) sfx.coin();
@@ -453,7 +487,7 @@ export default class UIScene extends Phaser.Scene {
         for (let i = 0; i < r.stars; i++) {
           this.tweens.add({
             targets: stars[i],
-            scale: stars[i].targetScale,
+            scale: starScale(i),
             angle: { from: -30, to: 0 },
             duration: 300,
             delay: 120 + i * 300,
