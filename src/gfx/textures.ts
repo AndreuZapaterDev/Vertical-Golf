@@ -399,15 +399,24 @@ function generateSky(scene: Phaser.Scene) {
       const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : T.bgB;
       const body = mix(base, T.outline, dark);
       const rim = T.sky === 'night' ? mix(T.bgA, T.outline, 0.1) : mix(base, '#ffffff', 0.3);
-      make(scene, `hills-${k}-${layer}`, w, h, (c) => {
+      const FILL = 420; // la tierra de las colinas se prolonga hacia abajo y se funde con la neblina
+      make(scene, `hills-${k}-${layer}`, w, h + FILL, (c) => {
         for (let x = 0; x < w; x++) {
           const a = (x / w) * Math.PI * 2;
           const top = Math.round(
             h * (layer ? 0.42 : 0.3) + Math.sin(a * f1 * 2 + seed) * 12 + Math.sin(a * f2 * 5 + seed * 2) * 6 + Math.sin(a * 11 + seed) * 1.5,
           );
-          rect(c, x, top, 1, h - top, body);
+          rect(c, x, top, 1, h + FILL - top, body);
           px(c, x, top, rim);
         }
+        // neblina: la parte baja se aclara hacia el color del cielo
+        const mist = c.createLinearGradient(0, h * 0.5, 0, h + FILL);
+        mist.addColorStop(0, 'rgba(255,255,255,0)');
+        mist.addColorStop(1, `rgba(255,255,255,${layer ? 0.55 : 0.7})`);
+        c.globalCompositeOperation = 'source-atop';
+        c.fillStyle = mist;
+        c.fillRect(0, 0, w, h + FILL);
+        c.globalCompositeOperation = 'source-over';
         // arbolitos en la capa cercana
         if (layer) {
           for (let i = 0; i < 9; i++) {

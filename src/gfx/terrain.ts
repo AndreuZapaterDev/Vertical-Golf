@@ -50,6 +50,9 @@ const ICE = { hi: rgb('#ffffff'), light: rgb('#d6f5ff'), base: rgb('#a8e2f5'), d
 const BUMP = [0, 1, 2, 2, 1, 0, 0, 0];
 const lighten = (c: RGBA, k: number): RGBA => [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k, 255].map(Math.round);
 
+/** mezcla dos colores RGBA (t = 0 → a, t = 1 → b) */
+const mixC = (a: RGBA, b: RGBA, t: number): RGBA => [0, 1, 2, 3].map((i) => Math.round(a[i] * (1 - t) + b[i] * t));
+
 type Palette = Record<string, RGBA>;
 interface Edges {
   left: number;
@@ -130,6 +133,8 @@ function paint(
     water: rgb(P.water, 225), waterHi: rgb(P.waterHi, 235), waterMid: rgb(P.waterMid, 230),
   };
   C.rockHi = lighten(C.dirtLight, 0.35);
+  C.deepWater = mixC(rgb(P.water, 235), rgb(P.outline, 235), 0.55);
+  C.foam = lighten(rgb(P.waterHi, 240), 0.6);
   C.grassAlt = rgb(P.grassAlt || P.grass);
   C.greenHi = rgb(P.greenHi || P.grassHi);
   C.green = rgb(P.green || P.grass);
@@ -137,6 +142,46 @@ function paint(
   C.roughHi = rgb(P.roughHi || P.grass);
   C.rough = rgb(P.rough || P.grassDark);
   C.roughDark = rgb(P.roughDark || P.grassLine);
+  // Profundidad: píxeles sólidos seguidos por encima (tierra) y de agua por encima (para sombrear el fondo)
+  const depth = new Uint8Array(w * h);
+  const wdepth = new Uint8Array(w * h);
+  for (let x = 0; x < w; x++) {
+    let d = 0;
+    let wd = 0;
+    for (let y = 0; y < h; y++) {
+      const i = y * w + x;
+      d = solid[i] ? Math.min(255, d + 1) : 0;
+      wd = water[i] ? Math.min(255, wd + 1) : 0;
+      depth[i] = d;
+      wdepth[i] = wd;
+    }
+  }
+  // Bajos de las islas flotantes: estalactitas de tierra y alguna enredadera colgando (solo adorno, sin física).
+  // under[i] = largo de la estalactita cuyo primer píxel es i; vine[i] = largo de la enredadera.
+  const under = new Uint8Array(w * h);
+  const vine = new Uint8Array(w * h);
+  if (!edgeSolid.bottom) {
+    for (let y = 0; y < h - 2; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!solid[i] || solid[i + w] || water[i + w]) continue;
+        const group = hash(x >> 2, y, 41);
+        if (group < 0.55) {
+          // estalactita de 4 columnas: el centro llega más abajo que los lados
+          const lc = 2 + Math.floor(hash(x >> 2, y, 42) * 4); // 2–5
+          const len = x % 4 === 1 || x % 4 === 2 ? lc : lc - 1;
+          let free = 0;
+          while (free < len && y + 1 + free < h && !solid[i + (1 + free) * w] && !water[i + (1 + free) * w]) free++;
+          if (free >= len) under[i + w] = len;
+        } else if (hash(x, y, 43) < 0.04 && !under[i + w]) {
+          const len = 6 + Math.floor(hash(x, y, 44) * 8);
+          let free = 0;
+          while (free < len && y + 1 + free < h && !solid[i + (1 + free) * w] && !water[i + (1 + free) * w]) free++;
+          if (free >= 5) vine[i + w] = free;
+        }
+      }
+    }
+  }
   // franjas de césped cortado: bandas de 6 px que alternan tono (como un fairway)
   const mow = (x: number) => P.mow && Math.floor(x / 6) % 2 === 1;
 
@@ -178,7 +223,13 @@ function paint(
                 const band = (((y + wv) % 7) + 7) % 7;
                 if (band === 0) col = C.stripe;
                 else if (band === 1 && hash(x >> 2, y, 4) < 0.5) col = C.dirtLight;
+                else if (hash(x, y, 51) < 0.012) col = C.dirtLight; // motas de piedra suelta
                 else col = C.dirt;
+              }
+              // la tierra se oscurece hacia el fondo de la isla (volumen) y junto al borde derecho/inferior (sombra)
+              if (col === C.dirt || col === C.stripe || col === C.dirtLight) {
+                const k = Math.min(1, Math.max(0, (depth[i] - 7) / 24)) * 0.3;
+                if (k > 0) col = mixC(col, C.outline, k);
               }
             }
           } else if (m === 2) {
@@ -195,7 +246,50 @@ function paint(
         const above = !Wt(x, y - 1) && !S(x, y - 1);
         const above2 = !Wt(x, y - 2) && !S(x, y - 2);
         col = above ? C.waterHi : above2 ? C.waterMid : C.water;
-        if (!above && hash(x >> 2, y, 5) < 0.04) col = C.waterMid;
+        const wd = wdepth[i];
+        if (!above && !above2) {
+          // el agua se oscurece con la profundidad (hasta 35 %) y deja ver vetas de luz
+          col = mixC(C.water, C.deepWater, Math.min(0.55, (wd - 2) / 14));
+          if (hash(x >> 1, y, 5) < 0.05) col = C.waterMid;
+          else if (wd <= 6 && (x + y * 3) % 11 === 0) col = C.waterHi; // destellos tipo cáusticas
+        }
+        // espuma donde el agua toca la tierra por los lados
+        if (wd <= 3 && (S(x - 1, y) || S(x + 1, y))) col = C.foam;
+      }
+      // estalactitas y enredaderas bajo las islas
+      if (!col && !water[i] && y > 0) {
+        for (let k = 1; k <= 14 && y - k + 1 >= 0; k++) {
+          const top = (y - k + 1) * w + x; // primer píxel bajo el borde de la isla
+          const len = under[top];
+          if (len >= k && k <= 5) {
+            const lN = x > 0 ? under[top - 1] : 0;
+            const lP = x < w - 1 ? under[top + 1] : 0;
+            col = k === len || lN < k || lP < k ? C.outline : hash(x, y, 45) < 0.3 ? C.dirt : C.stripe;
+            break;
+          }
+          const vl = vine[top];
+          if (vl >= k) {
+            // enredadera: hilo verde con hojitas alternas; la punta termina en hoja
+            col = k === vl ? C.grassHi : k % 3 === 0 ? C.grass : C.grassDark;
+            break;
+          }
+        }
+        // hojitas a los lados de la enredadera
+        if (!col) {
+          for (const dx of [-1, 1]) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= w) continue;
+            for (let k = 2; k <= 14 && y - k + 1 >= 0; k++) {
+              const vl = vine[(y - k + 1) * w + nx];
+              if (vl >= k && k % 3 === 0 && hash(nx, y, 46) < 0.8) {
+                col = C.grass;
+                break;
+              }
+              if (vl >= k) break;
+            }
+            if (col) break;
+          }
+        }
       }
       // briznas de hierba que asoman por encima del contorno
       if (!col && !water[i] && y + 1 < h && solid[i + w] === 1 && hash(x, y, 11) < 0.42) {

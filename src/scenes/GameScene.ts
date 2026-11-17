@@ -8,7 +8,7 @@ import { LEVELS, parseLevel, type ParsedLevel, type MechanicKey } from '../data/
 import { renderTerrain, renderBlock, cellSolid } from '../gfx/terrain';
 import { terrainRects, terrainRamps, thinSolidFor } from '../data/terrainShapes';
 import { tintFill } from '../gfx/tint';
-import { bakeTexture, rgba } from '../gfx/bake';
+import { bakeTexture, rgba, mixHex } from '../gfx/bake';
 import { sfx, music, haptic } from '../systems/audio';
 import { progress, type CoinLine } from '../systems/progress';
 import { SKINS, type Skin } from '../data/upgrades';
@@ -70,7 +70,7 @@ interface ImpactLook {
 
 
 /** Objeto del cielo con parallax (ver buildSky) */
-type SkyObject = (Phaser.GameObjects.Image | Phaser.GameObjects.TileSprite) & { f: number; baseY: number; baseX: number; tile?: boolean };
+type SkyObject = (Phaser.GameObjects.Image | Phaser.GameObjects.TileSprite) & { f: number; baseY: number; baseX: number; tile?: boolean; drift?: number };
 type Cloud = Phaser.GameObjects.Image & { vx: number };
 
 /** Lo mínimo que usamos de Matter.js (Phaser lo expone sin tipos fiables entre versiones) */
@@ -220,6 +220,9 @@ export default class GameScene extends Phaser.Scene {
 
   // --- objetos de la escena
   bus!: Phaser.Events.EventEmitter;
+  skyGrad!: Phaser.GameObjects.Image;
+  /** brillos que se deslizan por la superficie del agua */
+  waterFx: Phaser.GameObjects.TileSprite[] = [];
   bgTile!: Phaser.GameObjects.TileSprite;
   camOff: Vec = { x: 0, y: FOLLOW_OFFSET };
   sky: SkyObject[] = [];
@@ -368,6 +371,38 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-10);
+    this.bgTile.setAlpha(0.7); // damero más sutil: el cielo se lee como cielo, no como un tablero
+    // degradado de altura: cielo más profundo arriba (su opacidad sube con la altura de la cámara, ver updateSky)
+    const night = this.P.sky === 'night';
+    const deep = mixHex(this.P.bgA, night ? '#0a0e2a' : this.P.sky === 'sunset' ? '#7a4a8a' : '#2a56b8', night ? 0.6 : 0.7);
+    this.skyGrad = this.add
+      .image((W * (z - 1)) / 2, (H * (z - 1)) / 2, bakeTexture(this, `skygrad-${L.theme}`, 1, 64, (c) => {
+        const gr = c.createLinearGradient(0, 0, 0, 64);
+        gr.addColorStop(0, rgba(deep, 1));
+        gr.addColorStop(0.55, rgba(deep, 0.35));
+        gr.addColorStop(1, rgba(deep, 0));
+        c.fillStyle = gr;
+        c.fillRect(0, 0, 1, 64);
+      }, { linear: true }))
+      .setOrigin(0)
+      .setDisplaySize(W, H)
+      .setScrollFactor(0)
+      .setDepth(-9.95)
+      .setAlpha(0.3);
+    // viñeta suave: oscurece las esquinas y centra la mirada en la acción
+    this.add
+      .image((W * (z - 1)) / 2, (H * (z - 1)) / 2, bakeTexture(this, 'vignette', 64, 112, (c) => {
+        const gr = c.createRadialGradient(32, 56, 14, 32, 56, 78);
+        gr.addColorStop(0, 'rgba(10,18,40,0)');
+        gr.addColorStop(0.6, 'rgba(10,18,40,0.07)');
+        gr.addColorStop(1, 'rgba(10,18,40,0.34)');
+        c.fillStyle = gr;
+        c.fillRect(0, 0, 64, 112);
+      }, { linear: true }))
+      .setOrigin(0)
+      .setDisplaySize(W, H)
+      .setScrollFactor(0)
+      .setDepth(40);
     this.camOff = { x: 0, y: FOLLOW_OFFSET };
     this.buildSky();
     music.play(L.theme);
@@ -407,6 +442,7 @@ export default class GameScene extends Phaser.Scene {
       this.matter.world?.off('collisionactive', this.onCollActive);
       // el siguiente hoyo empieza con listas limpias (la escena se reutiliza)
       this.sky = [];
+      this.waterFx = [];
       this.clouds = [];
       this.movers = [];
       this.crumbles = [];
@@ -444,9 +480,12 @@ export default class GameScene extends Phaser.Scene {
     // colinas: al empezar, su base queda escondida tras el suelo.
     // Son tiras que se repiten en horizontal y acompañan a la cámara (los hoyos pueden ser más anchos que la pantalla).
     for (const [layer, y, f] of [[0, H - 18, 0.35], [1, H + 6, 0.55]]) {
-      const hills = this.add.tileSprite(0, 0, W + 8, 80, `hills-${th}-${layer}`).setOrigin(0, 1).setDepth(-9.6 + layer * 0.2);
+      const hills = this.add.tileSprite(0, 0, W + 8, 500, `hills-${th}-${layer}`).setOrigin(0, 80 / 500).setDepth(-9.6 + layer * 0.2);
       add(hills, y, f).tile = true;
     }
+
+    this.buildIslets(add, span);
+    this.buildWisps(add, span);
 
     if (sky === 'night') {
       add(this.add.image(52, 0, 'moon').setDepth(-9.8), 150, 0.1);
@@ -498,6 +537,109 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Jirones de nube en primer plano: cruzan por delante de las islas, más rápido que el mundo (parallax > 1),
+   * muy transparentes para no estorbar. Dan profundidad y sensación de altura.
+   */
+  buildWisps(add: (o: Phaser.GameObjects.Image, screenY: number, f: number) => SkyObject, span: number) {
+    if (this.P.sky === 'night') return;
+    const tint = this.P.cloudTint ?? 0xffffff;
+    const keys = [0, 1, 2].map((v) =>
+      bakeTexture(this, `wisp-${v}`, 180, 44, (c) => {
+        // nube blanda: varias elipses con degradado radial
+        let seed = 91 + v * 17;
+        const r = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+        for (let k = 0; k < 7; k++) {
+          const cx = 28 + k * 21 + r() * 8;
+          const cy = 22 + (r() - 0.5) * 12;
+          const rx = 24 + r() * 14;
+          const ry = 8 + r() * 6;
+          c.save();
+          c.translate(cx, cy);
+          c.scale(1, ry / rx);
+          const gr = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+          gr.addColorStop(0, 'rgba(255,255,255,0.55)');
+          gr.addColorStop(1, 'rgba(255,255,255,0)');
+          c.fillStyle = gr;
+          c.beginPath();
+          c.arc(0, 0, rx, 0, Math.PI * 2);
+          c.fill();
+          c.restore();
+        }
+      }, { linear: true }),
+    );
+    let seed = 777 + this.levelIndex * 13;
+    const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+    const f = 1.25;
+    const lo = -span * f - 40;
+    for (let sy = lo + rnd() * 120; sy < H - 160; sy += 520 + rnd() * 340) {
+      const img = this.add.image(Phaser.Math.Between(-60, W), 0, keys[Math.floor(rnd() * 3)]).setOrigin(0, 0).setTint(tint)
+        .setAlpha(0.2 + rnd() * 0.12).setScale(1.2 + rnd() * 0.9).setDepth(8);
+      const o = add(img, sy, f);
+      o.drift = (rnd() < 0.5 ? -1 : 1) * (3 + rnd() * 4); // px/s
+    }
+  }
+
+  /**
+   * Islotes flotantes lejanos con parallax: dan sensación de altura. Se pintan con los colores del mundo
+   * mezclados con el del cielo (perspectiva atmosférica), más difuminados cuanto más lejos.
+   */
+  buildIslets(add: (o: Phaser.GameObjects.Image, screenY: number, f: number) => SkyObject, span: number) {
+    const P = this.P;
+    const th = this.L.theme;
+    const rnd = (() => {
+      let a = 1234 + this.levelIndex * 77;
+      return () => ((a = (Math.imul(a, 1664525) + 1013904223) >>> 0) / 4294967296);
+    })();
+    // 3 formas de islote: [ancho, alto del cuerpo]
+    const shapes: [number, number][] = [[34, 15], [22, 11], [46, 18]];
+    const keys = shapes.map(([w, h], v) =>
+      bakeTexture(this, `islet2-${th}-${v}`, w, h + 4, (c) => {
+        const haze = P.bgA;
+        const mix = (col: string) => mixHex(col, haze, 0.55); // neblina: se leen como fondo lejano, no como plataformas
+        const grass = mix(P.grass), grassHi = mix(P.grassHi), grassDark = mix(P.grassDark);
+        const dirt = mix(P.dirt), stripe = mix(P.stripe), line = mix(P.outline);
+        const y0 = 4; // fila de la hierba (encima caben los matorrales)
+        const inside = (x: number, y: number) => {
+          if (y < y0 || y >= y0 + h) return false;
+          const t = (y - y0) / (h - 1);
+          const inset = Math.round((w / 2 - 3) * Math.pow(t, 1.7));
+          return x >= inset && x < w - inset;
+        };
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (!inside(x, y)) continue;
+            const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y + 1) || y === y0;
+            const d = y - y0;
+            c.fillStyle = edge ? line : d === 1 ? grassHi : d <= 3 ? grass : d === 4 ? grassDark : (x + y * 2) % 7 === 0 ? stripe : dirt;
+            c.fillRect(x, y, 1, 1);
+          }
+        }
+        // matorrales sobre la hierba
+        let seed = v * 31 + 7;
+        const r = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+        for (let k = 0; k < Math.max(1, Math.floor(w / 14)); k++) {
+          const bx = 4 + Math.floor(r() * (w - 11));
+          c.fillStyle = grassDark;
+          c.fillRect(bx, y0 - 2, 5, 2);
+          c.fillStyle = grass;
+          c.fillRect(bx + 1, y0 - 3, 3, 1);
+          c.fillRect(bx + 1, y0 - 2, 2, 1);
+        }
+      }),
+    );
+    for (const [f, alpha, n] of [[0.18, 0.38, 1], [0.34, 0.52, 1]] as const) {
+      const lo = -span * f - 30;
+      const hi = H - 130;
+      for (let sy = lo + rnd() * 60; sy < hi; sy += 150 + rnd() * 120) {
+        const v = Math.floor(rnd() * shapes.length);
+        const x = Phaser.Math.Between(-10, W - 20) + rnd() * 20;
+        const img = this.add.image(x, 0, keys[v]).setOrigin(0, 0).setAlpha(alpha).setDepth(-9.7).setScale(n);
+        add(img, sy, f);
+      }
+    }
+  }
+
   /** Rayos de luz suaves que salen del sol y se mecen despacio */
   sunRays(
     add: (o: Phaser.GameObjects.Image, screenY: number, f: number) => SkyObject,
@@ -519,7 +661,16 @@ export default class GameScene extends Phaser.Scene {
 
   updateSky() {
     const { x: vx, y: vy } = this.cameras.main.worldView;
+    const span = Math.max(1, this.worldH - H);
+    this.skyGrad.setAlpha(0.3 + 0.5 * Phaser.Math.Clamp(1 - vy / span, 0, 1));
+    const dt = this.game.loop.delta / 1000;
     for (const o of this.sky) {
+      if (o.drift) {
+        o.baseX += o.drift * dt;
+        const wrap = W + 260;
+        if (o.baseX > wrap) o.baseX -= wrap + 260;
+        else if (o.baseX < -260) o.baseX += wrap + 260;
+      }
       o.y = o.baseY + vy * (1 - o.f);
       if (o.tile && o instanceof Phaser.GameObjects.TileSprite) {
         o.x = vx - 4;
@@ -596,6 +747,27 @@ export default class GameScene extends Phaser.Scene {
           const gl = this.add.image(x, y - 5, 'glow').setTint(0x7fe3f5).setBlendMode('ADD').setScale(0.35).setAlpha(0.45).setDepth(6);
           this.tweens.add({ targets: gl, alpha: 0.2, duration: 1200 + h(r, c, 6) * 800, yoyo: true, repeat: -1 });
         } else if (p < 0.36) this.add.image(x, y, 'rock').setOrigin(0.5, 1).setDepth(6);
+      }
+    }
+    // destellos que se deslizan por la superficie del agua (una tira por charca)
+    this.waterFx = [];
+    const fx = bakeTexture(this, `waterfx-${this.L.theme}`, 24, 3, (c) => {
+      const hi = mixHex(this.P.waterHi, '#ffffff', 0.6);
+      c.fillStyle = rgba(hi, 0.95);
+      c.fillRect(2, 0, 6, 1);
+      c.fillRect(15, 0, 4, 1);
+      c.fillStyle = rgba(hi, 0.55);
+      c.fillRect(4, 1, 2, 1);
+      c.fillRect(16, 1, 2, 1);
+      c.fillRect(10, 2, 3, 1);
+    });
+    for (let r = 1; r < g.length; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (g[r][c] !== 'W' || g[r - 1][c] === 'W') continue;
+        let n = 1;
+        while (g[r][c + n] === 'W') n++;
+        this.waterFx.push(this.add.tileSprite(c * T, r * T + 1, n * T, 3, fx).setOrigin(0).setDepth(6.2).setAlpha(0.85));
+        c += n - 1;
       }
     }
     // ondas que brillan en la superficie del agua
@@ -1494,6 +1666,7 @@ export default class GameScene extends Phaser.Scene {
     this.bgTile.tilePositionX = view.x * 0.6;
     this.bgTile.tilePositionY = view.y * 0.6;
     this.updateSky();
+    for (const fx of this.waterFx) fx.tilePositionX = this.time.now * 0.007;
 
     // la cámara se adelanta hacia donde apuntas
     if (this.state === 'play') {

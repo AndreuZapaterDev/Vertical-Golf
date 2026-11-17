@@ -58,7 +58,11 @@ supabase/schema.sql       # tabla `scores` con RLS
 ## Cómo se ve
 
 Pixel art plano: terreno de tierra con contorno y vetas, hierba con festón, rampas, charcas de agua
-y fondo de cuadros. El mundo lógico mide 240 px de ancho (casillas de 12 px) y las cámaras hacen
+y fondo de cuadros (suavizado, con un degradado que se oscurece al subir y islotes lejanos con parallax).
+El agua tiene profundidad (se oscurece hacia el fondo), espuma en los bordes y destellos que se deslizan por la superficie.
+La tierra se oscurece hacia el fondo de cada isla. Hay una viñeta suave, jirones de nube en primer plano (parallax > 1)
+y las colinas del fondo se funden en neblina hasta el borde de la pantalla. Las islas flotantes llevan estalactitas de tierra y enredaderas colgando por debajo (adorno puro, sin física; se pintan
+en `paint()` de `src/gfx/terrain.ts`). El mundo lógico mide 240 px de ancho (casillas de 12 px) y las cámaras hacen
 zoom entero, así el arte se ve nítido y los textos van a alta resolución.
 
 ## Progresión (monedas y mejoras)

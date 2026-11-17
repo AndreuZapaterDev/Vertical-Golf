@@ -43,3 +43,11 @@ export const rgba = (hex: string, a: number) => {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
+
+/** Mezcla dos colores '#rrggbb' (t = 0 → a, t = 1 → b) */
+export const mixHex = (a: string, b: string, t: number) => {
+  const A = Number.parseInt(a.slice(1), 16);
+  const B = Number.parseInt(b.slice(1), 16);
+  const ch = (sh: number) => Math.round(((A >> sh) & 255) * (1 - t) + ((B >> sh) & 255) * t);
+  return `#${[16, 8, 0].map((sh) => ch(sh).toString(16).padStart(2, '0')).join('')}`;
+};
