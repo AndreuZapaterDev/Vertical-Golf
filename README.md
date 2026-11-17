@@ -16,6 +16,16 @@ Si añades dependencias nuevas a `package.json`, reconstruye: `docker compose up
 Comprobar los tipos de TypeScript (Vite no lo hace al compilar): `npm run typecheck`
 (o `docker compose exec game npm run typecheck`).
 
+## Jugar en el móvil
+
+Con el servidor de desarrollo arrancado, abre en el móvil (conectado a la misma wifi que el PC)
+`http://<IP-del-PC>:<puerto>` (por ejemplo `http://192.168.1.20:5173`; la IP sale con `ipconfig`).
+Si Windows pregunta por el firewall, permite el acceso en redes privadas.
+
+- Arrastra y suelta para golpear; **dos dedos** mueven el mapa.
+- El primer toque pone el juego a pantalla completa (en iPhone no se puede: usa "Añadir a pantalla de inicio").
+- Se puede instalar como app desde el menú del navegador ("Añadir a pantalla de inicio").
+
 ## Producción
 
 ```bash
@@ -53,9 +63,17 @@ zoom entero, así el arte se ve nítido y los textos van a alta resolución.
 
 ## Progresión (monedas y mejoras)
 
-Cada vez que completas un hoyo ganas monedas: +10 por terminarlo, +15 extra si lo haces con 3 estrellas,
-+10 bajo par y +25 por hoyo en uno. Se gastan en la tienda (**Mejoras**). Las mejoras compradas se pueden
-encender y apagar desde la tienda (ON/OFF) sin perder los niveles:
+Al completar un hoyo se ganan dos cosas:
+
+- **Monedas** (para las mejoras): +5 por terminar, +15 por cada estrella nueva, +10 bajo par y +25 por hoyo en uno.
+- **Fichas** (para el gachapón): +1 cada vez que terminas un hoyo y +1 extra si es con 3 estrellas.
+
+En la **Tienda** hay tres pestañas: **Habilidades** (mejoras con monedas; las compradas se pueden encender
+y apagar con ON/OFF sin perder niveles), **Gachapón** (3 fichas por tirada: tipos de pelota, skins y rastros
+de rareza común, rara, épica o legendaria; sin repetidos: solo sale lo que te falta y las probabilidades se recalculan con tu colección) y **Colección** (equipar pelota,
+skin y rastro por separado: cualquier skin y cualquier rastro valen para cualquier tipo de pelota).
+Los tipos de pelota cambian la física (agarre, rebote, tamaño, potencia, gravedad, viento, imán del hoyo) y se
+suman a las mejoras. Los premios están en `src/data/cosmetics.ts`. Las mejoras:
 
 | Mejora | Efecto |
 |---|---|
@@ -66,7 +84,7 @@ encender y apagar desde la tienda (ON/OFF) sin perder los niveles:
 | Freno aéreo | Botón (o ESPACIO) que frena la bola en el aire, 1–3 usos por hoyo |
 | Salvavidas | Anula la penalización de agua/sierras/caídas, 1–2 por hoyo |
 
-También hay 6 bolas comprables, cada una con su estela. Precios y valores en `src/data/upgrades.ts`;
+Precios y valores de las mejoras en `src/data/upgrades.ts`;
 el guardado (localStorage) en `src/systems/progress.ts`.
 
 ## Mundos

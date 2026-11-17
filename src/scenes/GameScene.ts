@@ -10,7 +10,7 @@ import { tintFill } from '../gfx/tint';
 import { sfx, music, haptic } from '../systems/audio';
 import { progress, type CoinLine } from '../systems/progress';
 import { SKINS, type Skin } from '../data/upgrades';
-import { trailById, type Trail } from '../data/cosmetics';
+import { trailById, ballTypeById, type Trail, type BallType } from '../data/cosmetics';
 import { saveScore } from '../services/supabase';
 
 // ---------------------------------------------------------------- Tipos
@@ -147,6 +147,8 @@ const T = TILE;
 
 const POWER_COLORS = [hex('#72d454'), hex('#ffd36b'), hex('#ff8a5c'), hex('#ef4d5e')];
 const powerColor = (p: number) => POWER_COLORS[Math.min(3, Math.floor(p * 4))];
+const SHOT_POWER_EXPONENT = 1.25;
+const shotPower = (dragLength: number) => Math.pow(Phaser.Math.Clamp(dragLength / MAX_DRAG, 0, 1), SHOT_POWER_EXPONENT);
 const FULL_MAT: Record<string, MaterialKey> = { '#': 'grass', G: 'grass', r: 'rough', s: 'sand', i: 'ice' };
 
 /**
@@ -204,6 +206,11 @@ export default class GameScene extends Phaser.Scene {
   shields = 0;
   skin!: Skin;
   trail!: Trail;
+  /** tipo de pelota equipado (física) */
+  ballType!: BallType;
+  /** radio de la bola y escala de su sprite (dependen del tipo) */
+  ballR = BALL_R;
+  ballScale = 1;
   /** tono principal del rastro (luz de la bola, fogonazo del golpe) */
   trailColor = 0xffffff;
   trailFx!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -259,7 +266,7 @@ export default class GameScene extends Phaser.Scene {
   /** cámara libre (botón central): no sigue a la bola hasta apuntar o golpear */
   freeCam = false;
   /** arrastre en curso: posición inicial del puntero y del scroll de la cámara */
-  pan: { x: number; y: number; scrollX: number; scrollY: number } | null = null;
+  pan: { x: number; y: number; scrollX: number; scrollY: number; touch: boolean } | null = null;
   onRestart!: () => void;
   onShootKey!: () => void;
 
@@ -299,11 +306,16 @@ export default class GameScene extends Phaser.Scene {
     this.chargeStep = 0;
 
     // Mejoras de la cuenta
+    // Tipo de pelota: sus multiplicadores se suman a los de las mejoras
+    this.ballType = ballTypeById(progress.ball);
+    const bt = this.ballType;
+    this.ballR = bt.radius ?? BALL_R;
+    this.ballScale = this.ballR / BALL_R;
     this.stats = {
-      power: progress.stat('power'),
+      power: progress.stat('power') * (bt.power ?? 1),
       aim: progress.stat('aim'),
-      grip: progress.stat('grip'),
-      magnet: progress.stat('magnet'),
+      grip: progress.stat('grip') * (bt.grip ?? 1),
+      magnet: progress.stat('magnet') * (bt.magnet ?? 1),
     };
     this.brakes = progress.stat('brake');
     this.shields = progress.stat('shield');
@@ -732,9 +744,9 @@ export default class GameScene extends Phaser.Scene {
 
   createBall() {
     const s = this.L.start;
-    this.startPos = { x: s.c * T + T / 2, y: (s.r + 1) * T - BALL_R };
-    this.ball = this.matter.add.circle(this.startPos.x, this.startPos.y, BALL_R, {
-      label: 'ball', restitution: 0, friction: 0.4, frictionStatic: 0.3, frictionAir: 0, density: 0.004,
+    this.startPos = { x: s.c * T + T / 2, y: (s.r + 1) * T - this.ballR };
+    this.ball = this.matter.add.circle(this.startPos.x, this.startPos.y, this.ballR, {
+      label: 'ball', restitution: this.ballType.bounce ?? 0, friction: 0.4, frictionStatic: 0.3, frictionAir: 0, density: 0.004,
     });
     // marcas de salida del tee (en la Pradera)
     if (this.P.decor === 'meadow') {
@@ -745,7 +757,7 @@ export default class GameScene extends Phaser.Scene {
     this.trailG = this.add.graphics().setDepth(9);
     this.ballLight = this.add.image(this.startPos.x, this.startPos.y, 'glow').setBlendMode('ADD').setTint(this.trailColor).setScale(0.35).setAlpha(0.12).setDepth(9.5);
     this.ballShadow = this.add.image(0, 0, 'bshadow').setDepth(6).setAlpha(0);
-    this.ballSprite = this.add.sprite(this.startPos.x, this.startPos.y, `ball-${this.skin.id}`, 0).setDepth(10);
+    this.ballSprite = this.add.sprite(this.startPos.x, this.startPos.y, `ball-${this.skin.id}`, 0).setDepth(10).setScale(this.ballScale);
     this.counter = this.add
       .text(0, 0, '0', {
         fontFamily: FONT, fontSize: `${Math.round(11 * FONT_SCALE)}px`, color: '#ffffff', stroke: this.P.outline, strokeThickness: 3, resolution: VIEW.Z,
@@ -769,6 +781,11 @@ export default class GameScene extends Phaser.Scene {
       crumble: { light: 0xffc090, bits: [hex(P.dirtLight), hex(P.dirt), hex(P.stripe)], n: 1.6 },
       bounds: { light: 0xffffff, bits: [0xffffff, hex('#ffd36b')], n: 0.8 },
     };
+    // chispas de los rastros especiales (fuego, estrellas, oro…)
+    this.trailFx = this.add.particles(0, 0, 'px', {
+      lifespan: { min: 250, max: 500 }, speed: { min: 5, max: 25 }, angle: { min: 0, max: 360 }, gravityY: 30,
+      scale: { start: 1, end: 0 }, alpha: { start: 1, end: 0 }, blendMode: 'ADD', emitting: false,
+    }).setDepth(9);
     // trocitos de superficie: salen hacia arriba y caen con gravedad
     this.debris = this.add.particles(0, 0, 'px', {
       lifespan: { min: 320, max: 650 }, speed: { min: 40, max: 150 }, angle: { min: 215, max: 325 }, gravityY: 420,
@@ -832,11 +849,23 @@ export default class GameScene extends Phaser.Scene {
    */
   setupInput() {
     const Z = VIEW.Z;
+    // dos dedos (config: input.activePointers = 2) → mover el mapa
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    const mid = () => ({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 });
     this.onDown = (p) => {
       sfx.unlock();
       if (p.middleButtonDown()) {
         if (this.state === 'intro') this.skipIntro();
-        this.startPan(p);
+        this.startPan(p.x, p.y, false);
+        return;
+      }
+      // dos dedos en la pantalla: se cancela el apuntado y se mueve el mapa
+      if (p1.isDown && p2.isDown) {
+        if (this.state === 'intro') this.skipIntro();
+        this.cancelAim();
+        const m = mid();
+        this.startPan(m.x, m.y, true);
         return;
       }
       if (this.state === 'intro') return this.skipIntro();
@@ -851,8 +880,9 @@ export default class GameScene extends Phaser.Scene {
     this.onMove = (p) => {
       if (this.pan) {
         // arrastrar = mover el mapa con la mano (la cámara va al revés que el ratón)
+        const at = this.pan.touch ? mid() : p;
         const cam = this.cameras.main;
-        cam.setScroll(this.pan.scrollX - (p.x - this.pan.x) / cam.zoom, this.pan.scrollY - (p.y - this.pan.y) / cam.zoom);
+        cam.setScroll(this.pan.scrollX - (at.x - this.pan.x) / cam.zoom, this.pan.scrollY - (at.y - this.pan.y) / cam.zoom);
         return;
       }
       if (!this.aiming || this.kbAiming) return;
@@ -860,7 +890,8 @@ export default class GameScene extends Phaser.Scene {
       if (this.aimVec.length() > MAX_DRAG) this.aimVec.setLength(MAX_DRAG);
     };
     this.onUp = (p) => {
-      if (this.pan && (p.button === 1 || !p.middleButtonDown())) {
+      // con dos dedos, el arrastre acaba al levantar cualquiera de ellos
+      if (this.pan && (this.pan.touch || p.button === 1 || !p.middleButtonDown())) {
         this.pan = null;
         this.input.setDefaultCursor('default');
         return;
@@ -918,14 +949,14 @@ export default class GameScene extends Phaser.Scene {
     kb?.off('keydown-ENTER', this.onShootKey);
   }
 
-  /** Empieza a mover la cámara libremente (botón central) */
-  startPan(p: Phaser.Input.Pointer) {
+  /** Empieza a mover la cámara libremente (botón central o dos dedos) */
+  startPan(x: number, y: number, touch: boolean) {
     const cam = this.cameras.main;
     cam.stopFollow();
     cam.panEffect.reset();
     this.freeCam = true;
-    this.pan = { x: p.x, y: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY };
-    this.input.setDefaultCursor('grabbing');
+    this.pan = { x, y, scrollX: cam.scrollX, scrollY: cam.scrollY, touch };
+    if (!touch) this.input.setDefaultCursor('grabbing');
   }
 
   /** La cámara vuelve a seguir a la bola (suavemente, por el lerp del seguimiento) */
@@ -985,7 +1016,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Clics que suben de tono con cada cuarto de potencia mientras apuntas */
   chargeFeedback() {
-    const step = Math.min(4, Math.floor((this.aimVec.length() / MAX_DRAG) * 4 + 0.001));
+    const step = Math.min(4, Math.floor(shotPower(this.aimVec.length()) * 4 + 0.001));
     if (step > this.chargeStep) {
       if (step === 4) {
         sfx.chargeMax();
@@ -1080,14 +1111,14 @@ export default class GameScene extends Phaser.Scene {
     const mat = other.mat || 'grass';
     const look = this.impactLooks[mat];
     const p = this.ball.position;
-    const hx = p.x + nx * BALL_R;
-    const hy = p.y + ny * BALL_R;
+    const hx = p.x + nx * this.ballR;
+    const hy = p.y + ny * this.ballR;
     const k = Phaser.Math.Clamp((impact - 60) / 300, 0, 1); // 0 = toque suave, 1 = golpe fuerte
 
     // destello de luz en el punto de contacto
     this.flashLight(hx, hy, look.light, 0.25 + k * 0.45, 0.35 + k * 0.5);
 
-    if (floor && impact > 120) this.ringFx(p.x, p.y + BALL_R, { flat: 0.4, r: 10 + k * 10 });
+    if (floor && impact > 120) this.ringFx(p.x, p.y + this.ballR, { flat: 0.4, r: 10 + k * 10 });
     if (impact > 260) {
       this.hitStop = Math.max(this.hitStop, 30);
       this.shake(70, 0.003);
@@ -1095,19 +1126,19 @@ export default class GameScene extends Phaser.Scene {
     }
     if (floor) {
       this.dust.particleTint = MATERIALS[mat].dust;
-      this.dust.explode(Math.min(8, Math.round(impact / 35)), p.x, p.y + BALL_R);
+      this.dust.explode(Math.min(8, Math.round(impact / 35)), p.x, p.y + this.ballR);
       // trocitos del material, en dos o tres tonos
       const n = Math.round(Math.min(14, impact / 28) * look.n);
       look.bits.forEach((col, i) => {
         this.debris.particleTint = col;
         this.debris.explode(Math.max(1, Math.round(n / look.bits.length) - i), hx, hy - 1);
       });
-      this.tweens.add({ targets: this.ballSprite, scaleY: 0.75 - k * 0.1, scaleX: 1.25 + k * 0.1, duration: 60, yoyo: true });
+      this.tweens.add({ targets: this.ballSprite, scaleY: (0.75 - k * 0.1) * this.ballScale, scaleX: (1.25 + k * 0.1) * this.ballScale, duration: 60, yoyo: true });
       this.shakeDecor(hx, hy, k);
     } else {
       // pared o techo: chispas pequeñas
       this.sparks.explode(2 + Math.round(k * 5), hx, hy);
-      this.tweens.add({ targets: this.ballSprite, scaleX: 0.8, scaleY: 1.15, duration: 50, yoyo: true });
+      this.tweens.add({ targets: this.ballSprite, scaleX: 0.8 * this.ballScale, scaleY: 1.15 * this.ballScale, duration: 50, yoyo: true });
     }
     // la seta se aplasta y rebota
     if (mat === 'mushroom' && other.sprite) {
@@ -1164,7 +1195,7 @@ export default class GameScene extends Phaser.Scene {
     sfx.bumper();
   }
 
-  /** Un paso fijo de física + reglas propias (amortiguación, viento, plataformas) */
+  /** Un paso fijo de física + reglas propias (rozamiento tangencial, viento, plataformas) */
   tick(ms: number) {
     const dt = ms / 1000;
     this.simTime += ms;
@@ -1197,15 +1228,21 @@ export default class GameScene extends Phaser.Scene {
     if (this.grounded && gb) {
       const M = MATERIALS[gb.mat ?? 'grass'];
       const k = Math.exp(-M.damp * this.stats.grip * dt);
-      vx = carrierVx + (vx - carrierVx) * k;
-      if (vy > 0) vy *= k;
+      const { x: nx, y: ny } = this.groundNormal;
+      const relativeVx = vx - carrierVx;
+      const normalSpeed = relativeVx * nx + vy * ny;
+      const tangentSpeed = (relativeVx * ny - vy * nx) * k;
+      vx = carrierVx + normalSpeed * nx + tangentSpeed * ny;
+      vy = normalSpeed * ny - tangentSpeed * nx;
       if (this.groundNormal.y > 0.97 && this.relSpeed < 5) {
         vx = carrierVx;
         vy = 0;
       }
       if (gb.crumble && gb.crumble.state === 'idle') this.startCrumble(gb.crumble);
     } else {
-      vx += this.L.wind * dt;
+      vx += this.L.wind * (this.ballType.wind ?? 1) * dt;
+      // gravedad propia del tipo (Matter ya aplica la normal: se suma solo la diferencia)
+      vy += GRAVITY * ((this.ballType.gravity ?? 1) - 1) * dt;
     }
     this.setVel(vx, vy);
   }
@@ -1225,7 +1262,7 @@ export default class GameScene extends Phaser.Scene {
       // Reaparece pasado un rato, pero nunca encima de la bola (se quedaría incrustada)
       const restore = () => {
         const p = this.ball.position;
-        const r = BALL_R + 1;
+        const r = this.ballR + 1;
         if (p.x > cr.x - r && p.x < cr.x + cr.w + r && p.y > cr.y - r && p.y < cr.y + T + r) {
           this.time.delayedCall(300, restore);
           return;
@@ -1242,7 +1279,7 @@ export default class GameScene extends Phaser.Scene {
   shoot(v: Phaser.Math.Vector2) {
     this.resumeFollow();
     const mat = this.currentMat();
-    const power = Math.min(v.length() / MAX_DRAG, 1);
+    const power = shotPower(v.length());
     const dir = v.clone().normalize();
     const sp = power * MAX_SPEED * this.stats.power * MATERIALS[mat].power;
     this.setVel(dir.x * sp + this.carrierVelocity(), dir.y * sp);
@@ -1257,16 +1294,16 @@ export default class GameScene extends Phaser.Scene {
 
     const p = this.ball.position;
     this.dust.particleTint = MATERIALS[mat].dust;
-    this.dust.explode(6, p.x, p.y + BALL_R);
+    this.dust.explode(6, p.x, p.y + this.ballR);
     // el palo levanta un poco de suelo y hay un fogonazo del color de la bola
     const look = this.impactLooks[mat];
     look.bits.forEach((col) => {
       this.debris.particleTint = col;
-      this.debris.explode(Math.round(2 + power * 4 * look.n), p.x, p.y + BALL_R - 1);
+      this.debris.explode(Math.round(2 + power * 4 * look.n), p.x, p.y + this.ballR - 1);
     });
     this.flashLight(p.x, p.y, this.trailColor, 0.3 + power * 0.4, 0.4 + power * 0.5);
-    this.shakeDecor(p.x, p.y + BALL_R, power * 0.6);
-    this.tweens.add({ targets: this.ballSprite, scaleX: 0.75, scaleY: 1.25, duration: 70, yoyo: true });
+    this.shakeDecor(p.x, p.y + this.ballR, power * 0.6);
+    this.tweens.add({ targets: this.ballSprite, scaleX: 0.75 * this.ballScale, scaleY: 1.25 * this.ballScale, duration: 70, yoyo: true });
     sfx.hit(power);
     if (mat === 'mushroom') {
       this.sparks.explode(8, p.x, p.y + 4);
@@ -1276,7 +1313,7 @@ export default class GameScene extends Phaser.Scene {
       this.shake(100, 0.005);
       this.hitStop = 45;
     }
-    this.ringFx(p.x, p.y + BALL_R, { r: 6 + power * 10, flat: 0.4, duration: 260 });
+    this.ringFx(p.x, p.y + this.ballR, { r: 6 + power * 10, flat: 0.4, duration: 260 });
     haptic(Math.round(8 + power * 22));
 
     this.bus.emit('shot', this.strokes);
@@ -1290,7 +1327,7 @@ export default class GameScene extends Phaser.Scene {
     const len = v.length();
     if (len < 6) return;
 
-    const power = len / MAX_DRAG;
+    const power = shotPower(len);
     const dir = v.clone().normalize();
     const sp = power * MAX_SPEED * this.stats.power * MATERIALS[this.currentMat()].power;
     const col = powerColor(power);
@@ -1300,18 +1337,27 @@ export default class GameScene extends Phaser.Scene {
     let y = cy;
     let vx = dir.x * sp + this.carrierVelocity();
     let vy = dir.y * sp;
-    const st = 1 / 60;
-    const n = Math.round(this.stats.aim * 60); // la mejora "Visor" alarga la trayectoria visible
+    const st = STEP / 1000;
+    const n = Math.ceil(this.stats.aim / st); // la mejora "Visor" alarga la trayectoria visible
+    let impact = false;
     for (let i = 1; i <= n; i++) {
-      vx += this.L.wind * st;
-      vy += GRAVITY * st;
+      vx += this.L.wind * (this.ballType.wind ?? 1) * st;
+      vy += GRAVITY * (this.ballType.gravity ?? 1) * st;
       x += vx * st;
       y += vy * st;
+      if (this.trajectoryHitsTerrain(x, y)) {
+        impact = true;
+        break;
+      }
       if (i % 3 === 0) {
         const k = 1 - i / n;
         g.fillStyle(ink, 0.6).fillCircle(x, y, 1.6 + k);
         g.fillStyle(0xffffff, 1).fillCircle(x, y, 0.9 + k);
       }
+    }
+    if (impact) {
+      g.lineStyle(1.2, col, 0.9).strokeCircle(x, y, 3.2);
+      g.fillStyle(col, 0.85).fillCircle(x, y, 1);
     }
 
     const bx = cx - dir.x * len * 0.4;
@@ -1328,14 +1374,41 @@ export default class GameScene extends Phaser.Scene {
     g.strokePath();
   }
 
+  /** Comprueba el contacto de la bola con el terreno sólido del mapa. */
+  trajectoryHitsTerrain(x: number, y: number): boolean {
+    const radius = this.ballR * 0.9;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const px = x + Math.cos(angle) * radius;
+      const py = y + Math.sin(angle) * radius;
+      const ch = this.cellAt(px, py);
+      const lx = ((px % T) + T) % T;
+      const ly = ((py % T) + T) % T;
+      if (cellSolid(ch, lx, ly)) return true;
+    }
+    return false;
+  }
+
+  /** Rastro equipado: degradado de colores a lo largo de la cola (o arcoíris que gira) y chispas */
   drawTrail() {
     const g = this.trailG;
     g.clear();
     const pts = this.trailPts;
+    const tr = this.trail;
+    const cols = tr.colors;
+    const wMax = (tr.width ?? 6) - 1;
+    const shift = tr.rainbow ? Math.floor(this.time.now / 90) : 0;
     for (let i = 1; i < pts.length; i++) {
       const k = i / pts.length;
-      g.lineStyle(1 + k * 5, this.trailColor, k * 0.5);
+      const col = cols[(Math.min(cols.length - 1, Math.floor(k * cols.length)) + shift) % cols.length];
+      g.lineStyle(1 + k * wMax, col, k * (tr.rainbow ? 0.7 : 0.55));
       g.lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    // chispas que se desprenden de la cola
+    if (tr.sparkle && pts.length > 2 && Math.random() < 0.45) {
+      const p = pts[pts.length - 2];
+      this.trailFx.particleTint = tr.sparkle[Math.floor(Math.random() * tr.sparkle.length)];
+      this.trailFx.explode(1, p.x + Phaser.Math.Between(-2, 2), p.y + Phaser.Math.Between(-2, 2));
     }
   }
 
@@ -1352,7 +1425,7 @@ export default class GameScene extends Phaser.Scene {
     }
     const maxD = 110;
     let gy: number | null = null;
-    for (let d = BALL_R - 1; d < maxD; d++) {
+    for (let d = this.ballR - 1; d < maxD; d++) {
       const y = cy + d;
       const ch = this.cellAt(cx, y);
       const lx = ((Math.floor(cx) % T) + T) % T;
@@ -1366,7 +1439,7 @@ export default class GameScene extends Phaser.Scene {
       s.setAlpha(0);
       return;
     }
-    const k = Phaser.Math.Clamp((gy - cy - BALL_R) / maxD, 0, 1);
+    const k = Phaser.Math.Clamp((gy - cy - this.ballR) / maxD, 0, 1);
     s.setPosition(cx, gy - 1).setScale(1 - k * 0.6, 1).setAlpha(0.28 * (1 - k));
   }
 
@@ -1391,11 +1464,11 @@ export default class GameScene extends Phaser.Scene {
     const mat = this.currentMat();
     if (mat === 'mushroom' || mat === 'bounds') return;
     this.dust.particleTint = MATERIALS[mat].dust;
-    this.dust.explode(1, cx, cy + BALL_R);
+    this.dust.explode(1, cx, cy + this.ballR);
     if (Math.random() < 0.5) {
       const bits = this.impactLooks[mat].bits;
       this.debris.particleTint = bits[Math.floor(Math.random() * bits.length)];
-      this.debris.explode(1, cx, cy + BALL_R - 1);
+      this.debris.explode(1, cx, cy + this.ballR - 1);
     }
   }
 
@@ -1405,7 +1478,7 @@ export default class GameScene extends Phaser.Scene {
   targetTimeScale() {
     if (this.state !== 'play' || this.respawning || this.grounded || this.relSpeed < 40) return 1;
     const p = this.ball.position;
-    const d = Phaser.Math.Distance.Between(p.x, p.y, this.cupPos.x, this.cupPos.y - BALL_R);
+    const d = Phaser.Math.Distance.Between(p.x, p.y, this.cupPos.x, this.cupPos.y - this.ballR);
     return d < 30 ? 0.4 : 1;
   }
 
@@ -1475,7 +1548,7 @@ export default class GameScene extends Phaser.Scene {
     const playing = this.state === 'play' && !this.respawning;
     if (playing) {
       const dxCup = this.cupPos.x - cx;
-      const dyCup = cy - (this.cupPos.y - BALL_R);
+      const dyCup = cy - (this.cupPos.y - this.ballR);
       if (this.grounded && Math.abs(dyCup) < 2 && Math.abs(dxCup) < this.stats.magnet && Math.abs(dxCup) > 0.5) {
         this.setVel(Phaser.Math.Clamp(dxCup * 6, -60, 60), this.getVel().y);
       }
@@ -1520,17 +1593,17 @@ export default class GameScene extends Phaser.Scene {
     if (this.aiming) this.chargeFeedback();
 
     // contador de golpes sobre la bola y anillo de "listo"
-    this.counter.setVisible(this.ready || this.aiming).setText(String(this.strokes)).setPosition(cx, cy - 9);
+    this.counter.setVisible(this.ready || this.aiming).setText(String(this.strokes)).setPosition(cx, cy - 4 - this.ballR);
     this.readyRing.clear();
     if (this.ready && !this.aiming) {
       const t = ((this.time.now - this.readyTime) % 1000) / 1000;
-      this.readyRing.lineStyle(1.2, 0xffffff, 0.9 * (1 - t)).strokeCircle(cx, cy, 7 + t * 7);
+      this.readyRing.lineStyle(1.2, 0xffffff, 0.9 * (1 - t)).strokeCircle(cx, cy, 2 + this.ballR + t * 7);
     }
     if (this.aiming) this.drawAim(cx, cy);
 
     this.drawHolePointer(playing);
 
-    const t = Phaser.Math.Clamp((this.startPos.y - cy) / (this.startPos.y - (this.cupPos.y - BALL_R)), 0, 1);
+    const t = Phaser.Math.Clamp((this.startPos.y - cy) / (this.startPos.y - (this.cupPos.y - this.ballR)), 0, 1);
     this.bus.emit('progress', t);
   }
 
@@ -1596,7 +1669,7 @@ export default class GameScene extends Phaser.Scene {
     const p = this.ball.position;
     this.ringFx(p.x, p.y);
     this.sparks.explode(8, p.x, p.y);
-    this.tweens.add({ targets: this.ballSprite, scale: 1.4, duration: 80, yoyo: true });
+    this.tweens.add({ targets: this.ballSprite, scale: 1.4 * this.ballScale, duration: 80, yoyo: true });
     this.trailPts = [];
     haptic(25);
     sfx.brake();
@@ -1627,7 +1700,7 @@ export default class GameScene extends Phaser.Scene {
     const sub = saved ? `Salvavidas usado (quedan ${this.shields})` : '+1 golpe de penalización';
 
     if (kind === 'ob') {
-      this.tweens.add({ targets: this.ballSprite, scale: 0.3, alpha: 0, duration: 300 });
+      this.tweens.add({ targets: this.ballSprite, scale: 0.3 * this.ballScale, alpha: 0, duration: 300 });
       sfx.whoosh();
       this.bus.emit('toast', { title: '¡Fuera de límites!', text: sub, color: saved ? '#b8ec6a' : '#ffd36b', duration: 1600 });
     } else if (kind === 'water') {
@@ -1656,7 +1729,7 @@ export default class GameScene extends Phaser.Scene {
       this.groundTime = -1000;
       this.restTime = 0;
       this.ballSprite.setPosition(p.x, p.y).setVisible(true).setAlpha(1).setScale(0);
-      this.tweens.add({ targets: this.ballSprite, scale: 1, duration: 250, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: this.ballSprite, scale: this.ballScale, duration: 250, ease: 'Back.easeOut' });
       this.sparks.explode(6, p.x, p.y);
       this.respawning = false;
     });
@@ -1677,7 +1750,7 @@ export default class GameScene extends Phaser.Scene {
     // la bola se asoma al borde, gira y cae dentro de la copa
     this.tweens.add({ targets: this.ballSprite, x, y: y - 3, duration: 90, ease: 'Sine.easeOut' });
     this.tweens.add({
-      targets: this.ballSprite, y: y + 3, scale: 0.5, angle: 180, delay: 90, duration: 150, ease: 'Quad.easeIn',
+      targets: this.ballSprite, y: y + 3, scale: 0.5 * this.ballScale, angle: 180, delay: 90, duration: 150, ease: 'Quad.easeIn',
       onComplete: () => this.ballSprite.setVisible(false).setAngle(0),
     });
     sfx.hole();

@@ -37,30 +37,33 @@ export default class LevelSelectScene extends Phaser.Scene {
     tintFill(this.add.image(3, gy + 4, tk), 0x1a1020).setOrigin(0).setAlpha(0.16);
     this.add.image(0, gy, tk).setOrigin(0);
 
-    label(this, W / 2, 22, wd.name.toUpperCase(), 22, { weight: '700', color: PAL.sand, strokeThickness: 4 });
-    label(this, W / 2, 42, wd.tagline, 9, { color: '#ffffff', strokeThickness: 2 });
+    panel(this, W / 2, 27, 164, 42, 'hud9');
+    label(this, W / 2, 20, wd.name.toUpperCase(), 20, { weight: '700', color: PAL.sand, strokeThickness: 4 });
+    label(this, W / 2, 40, wd.tagline, 8, { color: '#ffffff', strokeThickness: 2 });
     iconButton(this, 16, 22, 'back', () => this.go('Worlds'));
     this.input.keyboard?.on('keydown-ESC', () => this.go('Worlds'));
 
     const holes = LEVELS.map((l, i) => ({ l, i })).filter(({ l }) => l.world === wd.id);
-    panel(this, W / 2, 62, 64, 16, 'hud9');
-    this.add.image(W / 2 - 18, 62, 'star-sm');
-    label(this, W / 2 - 10, 62, `${progress.worldStars(wd.id)}/${holes.length * 3}`, 10, { ox: 0, weight: '700' });
+    panel(this, W / 2, 72, 96, 18, 'hud9');
+    this.add.image(W / 2 - 34, 72, 'star-sm');
+    label(this, W / 2 - 26, 72, `${progress.worldStars(wd.id)}/${holes.length * 3}`, 9, { ox: 0, weight: '700' });
+    label(this, W / 2 + 12, 72, 'ESTRELLAS', 6, { color: '#f0dcc0', strokeThickness: 1 });
 
     const xs = [52, 120, 188];
     holes.forEach(({ l, i }, k) => {
       const x = xs[k % 3];
-      const ty = 110 + Math.floor(k / 3) * 76;
+      const ty = 116 + Math.floor(k / 3) * 76;
       const unlocked = progress.isLevelUnlocked(i);
       const rec = progress.level(l.id);
 
       const c = this.add.container(x, ty);
-      c.add(this.add.nineslice(0, 0, `btn9-${unlocked ? wd.button : 'gray'}`, 0, 52, 50, 5, 5, 5, 7));
+      c.add(this.add.nineslice(0, 0, `btn9-${unlocked ? wd.button : 'gray'}`, 0, 58, 68, 5, 5, 5, 7));
       if (unlocked) {
-        c.add(label(this, 0, -9, `${l.number}`, 20, { weight: '700', strokeThickness: 3 }));
-        for (let s = 0; s < 3; s++) c.add(this.add.image(-11 + s * 11, 11 - (s === 1 ? 1 : 0), rec && s < rec.stars ? 'star-sm' : 'star-sm-empty'));
-        c.add(label(this, 0, 33, rec ? `Mejor ${rec.best} · Par ${l.par}` : `Par ${l.par}`, 7, { color: '#ffffff', strokeThickness: 2 }));
-        c.setSize(52, 50).setInteractive({ useHandCursor: true });
+        c.add(label(this, 0, -18, `${l.number}`, 20, { weight: '700', strokeThickness: 3 }));
+        c.add(label(this, 0, -2, l.name, 6, { color: '#fff8ec', strokeThickness: 1, wrap: 54 }));
+        for (let s = 0; s < 3; s++) c.add(this.add.image(-11 + s * 11, 13 - (s === 1 ? 1 : 0), rec && s < rec.stars ? 'star-sm' : 'star-sm-empty'));
+        c.add(label(this, 0, 29, rec ? `MEJOR ${rec.best} · PAR ${l.par}` : `PAR ${l.par}`, 6, { color: '#ffffff', strokeThickness: 1 }));
+        c.setSize(58, 68).setInteractive({ useHandCursor: true });
         c.on('pointerover', () => this.tweens.add({ targets: c, scale: 1.07, duration: 90 }));
         c.on('pointerout', () => {
           this.tweens.add({ targets: c, scale: 1, duration: 90 });
@@ -78,7 +81,8 @@ export default class LevelSelectScene extends Phaser.Scene {
         // el siguiente hoyo por jugar late suavemente
         if (!rec) this.tweens.add({ targets: c.list[0], alpha: 0.75, duration: 600, yoyo: true, repeat: -1 });
       } else {
-        c.add(this.add.image(0, -2, 'lock'));
+        c.add(label(this, 0, -17, `${l.number}`, 18, { color: '#c8bfb4', strokeThickness: 3 }));
+        c.add(this.add.image(0, 5, 'lock').setScale(0.85));
       }
       c.setAlpha(0).setScale(0.6);
       this.tweens.add({ targets: c, alpha: 1, scale: 1, duration: 260, delay: 40 + k * 35, ease: 'Back.easeOut' });

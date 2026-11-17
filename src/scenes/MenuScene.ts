@@ -6,7 +6,7 @@ import { renderTerrain } from '../gfx/terrain';
 import { tintFill } from '../gfx/tint';
 import { openSettings, type SettingsPanel } from '../ui/settings';
 import { LEVELS } from '../data/levels';
-import { UPGRADES, SKINS } from '../data/upgrades';
+import { UPGRADES } from '../data/upgrades';
 import { progress } from '../systems/progress';
 import { sfx, music } from '../systems/audio';
 import { fitCamera } from '../ui/camera';
@@ -90,25 +90,31 @@ export default class MenuScene extends Phaser.Scene {
     label(this, W / 2, 142, 'Golpea, rebota y sube hasta el hoyo', 10);
 
     // Botones
-    const play = makeButton(this, W / 2, 196, { color: 'green', w: 120, h: 32, text: 'JUGAR', size: 18, onClick: () => this.go('Game', { levelIndex: next }) });
+    panel(this, W / 2, 244, 178, 146, 'panel9').setAlpha(0.94);
+    label(this, W / 2, 184, 'SIGUIENTE PARTIDA', 8, { color: '#f0dcc0', strokeThickness: 2 });
+    const play = makeButton(this, W / 2, 210, { color: 'green', w: 132, h: 34, text: 'JUGAR', size: 18, onClick: () => this.go('Game', { levelIndex: next }) });
     this.tweens.add({ targets: play, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    label(this, W / 2, 222, `${nextLevel.worldName} · Hoyo ${nextLevel.number} · ${nextLevel.name}`, 10, { color: PAL.sand });
-    makeButton(this, W / 2, 250, { color: 'gold', w: 120, h: 26, text: 'MUNDOS', size: 13, onClick: () => this.go('Worlds') });
-    const shop = makeButton(this, W / 2, 282, { color: 'blue', w: 120, h: 26, text: '   MEJORAS', size: 13, onClick: () => this.go('Shop', { back: 'Menu' }) });
+    panel(this, W / 2, 236, 160, 16, 'hud9').setAlpha(0.7);
+    label(this, W / 2, 236, `${nextLevel.worldName} · Hoyo ${nextLevel.number} · ${nextLevel.name}`, 8, { color: PAL.sand });
+    makeButton(this, W / 2, 267, { color: 'gold', w: 124, h: 26, text: 'MUNDOS', size: 13, onClick: () => this.go('Worlds') });
+    const shop = makeButton(this, W / 2, 297, { color: 'blue', w: 124, h: 26, text: '   TIENDA', size: 13, onClick: () => this.go('Shop', { back: 'Menu' }) });
     shop.add(this.add.image(-34, -2, 'up-power'));
     // aviso si hay alguna mejora o bola que ya puedes comprar
-    const canBuy = UPGRADES.some((u) => (progress.nextCost(u.id) ?? Infinity) <= progress.coins) || SKINS.some((s) => !progress.ownsSkin(s.id) && s.cost <= progress.coins);
+    const canBuy = UPGRADES.some((u) => (progress.nextCost(u.id) ?? Infinity) <= progress.coins) || progress.canPull();
     if (canBuy) {
-      const badge = label(this, W / 2 + 56, 270, '!', 12, { color: '#ffffff', stroke: '#ef4d5e', strokeThickness: 4 });
+      const badge = label(this, W / 2 + 67, 286, '!', 10, { color: '#ffffff', stroke: '#ef4d5e', strokeThickness: 4 });
       this.tweens.add({ targets: badge, scale: 1.3, duration: 400, yoyo: true, repeat: -1 });
     }
 
-    panel(this, 34, 14, 60, 20, 'hud9');
-    this.add.image(14, 14, 'star-sm');
-    label(this, 22, 14, `${progress.totalStars()}/${LEVELS.length * 3}`, 10, { ox: 0 });
-    panel(this, 98, 14, 60, 20, 'hud9');
-    this.add.image(78, 14, 'coin');
-    label(this, 86, 14, `${progress.coins}`, 10, { ox: 0, color: PAL.sand });
+    panel(this, 84, 14, 160, 20, 'hud9');
+    this.add.image(12, 14, 'star-sm');
+    label(this, 20, 14, `${progress.totalStars()}/${LEVELS.length * 3}`, 8, { ox: 0 });
+    this.add.rectangle(56, 14, 1, 13, 0xc8bfb4, 0.6);
+    this.add.image(63, 14, 'coin');
+    label(this, 71, 14, `${progress.coins}`, 8, { ox: 0, color: PAL.sand });
+    this.add.rectangle(108, 14, 1, 13, 0xc8bfb4, 0.6);
+    this.add.image(115, 14, 'token');
+    label(this, 123, 14, `${progress.tokens}`, 8, { ox: 0, color: '#d8b8ff' });
 
     // Ajustes (música, efectos, vibración, temblor)
     this.settingsPanel = null;
@@ -116,11 +122,11 @@ export default class MenuScene extends Phaser.Scene {
       if (this.settingsPanel) return;
       this.settingsPanel = openSettings(this, { onClose: () => (this.settingsPanel = null) });
     };
-    iconButton(this, W - 13, 14, 'gear', openPanel);
+    iconButton(this, W - 16, 14, 'gear', openPanel);
 
     // Modo DEV: todo desbloqueado (mundos, hoyos, bolas y mejoras gratis)
-    makeButton(this, W - 44, 14, {
-      color: progress.devMode ? 'orange' : 'gray', w: 38, h: 18, text: progress.devMode ? 'DEV ON' : 'DEV', size: 8,
+    makeButton(this, W - 56, 14, {
+      color: progress.devMode ? 'orange' : 'gray', w: 38, h: 18, text: progress.devMode ? 'DEV ON' : 'DEV', size: 7,
       onClick: () => {
         progress.setDevMode(!progress.devMode);
         this.scene.restart();

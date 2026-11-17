@@ -20,6 +20,28 @@ async function start() {
   }
   const game = new Phaser.Game(gameConfig);
   window.__GAME__ = game; // útil para depurar desde la consola
+  mobileFullscreen();
+}
+
+/**
+ * En el móvil, el primer toque pone el juego a pantalla completa y en vertical
+ * (los navegadores solo lo permiten tras una interacción). Si ya está instalado
+ * en la pantalla de inicio, no hace falta.
+ */
+function mobileFullscreen() {
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const standalone = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+  if (!touch || standalone) return;
+  const go = () => {
+    const el = document.documentElement;
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    el.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('portrait'))
+      .catch(() => {
+        /* iPhone (Safari) no deja: se juega igual, con las barras del navegador */
+      });
+  };
+  document.addEventListener('touchend', go, { once: true });
 }
 
 start();

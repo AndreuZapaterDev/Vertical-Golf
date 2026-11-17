@@ -25,10 +25,14 @@ export default class WorldSelectScene extends Phaser.Scene {
     fitCamera(this);
     this.bg = new Background(this, 'day');
 
-    label(this, W / 2, 24, 'MUNDOS', 22, { weight: '700', color: PAL.sand, strokeThickness: 4 });
+    panel(this, W / 2, 24, 108, 26, 'hud9');
+    label(this, W / 2, 24, 'MUNDOS', 20, { weight: '700', color: PAL.sand, strokeThickness: 4 });
+    label(this, W / 2, 47, 'ELIGE TU PRÓXIMO CAMPO', 7, { color: '#ffffff', strokeThickness: 2 });
     iconButton(this, 16, 24, 'back', () => this.go('Menu'));
     this.input.keyboard?.on('keydown-ESC', () => this.go('Menu'));
 
+    const unlockedWorlds = WORLDS.filter((_, i) => progress.isWorldUnlocked(i)).length;
+    label(this, W / 2, 74, `${unlockedWorlds}/${WORLDS.length} MUNDOS DISPONIBLES`, 8, { color: PAL.sand, strokeThickness: 2 });
     WORLDS.forEach((wd, i) => this.card(wd, i, 112 + i * 108));
   }
 
@@ -36,7 +40,7 @@ export default class WorldSelectScene extends Phaser.Scene {
     const unlocked = progress.isWorldUnlocked(i);
     const holes = wd.levels.length;
     const c = this.add.container(W / 2, y);
-    c.add(panel(this, 0, 0, CARD_W, 100));
+    c.add(panel(this, 0, 0, CARD_W, 100, 'panel9'));
 
     // cielo de cuadros + escenario del mundo
     const top = -44;
@@ -53,6 +57,11 @@ export default class WorldSelectScene extends Phaser.Scene {
 
     c.add(label(this, -100, 28, wd.name, 16, { ox: 0, weight: '700', color: unlocked ? '#ffffff' : '#c8bfb4' }));
     c.add(label(this, -100, 42, wd.tagline, 8, { ox: 0, color: '#f0dcc0', strokeThickness: 2 }));
+    const progressBar = this.add.graphics();
+    const ratio = unlocked && holes ? progress.worldCompleted(wd.id) / holes : 0;
+    progressBar.fillStyle(0x1a1020, 0.9).fillRoundedRect(-100, 48, 200, 3, 1);
+    if (ratio > 0) progressBar.fillStyle(0xb8ec6a).fillRoundedRect(-100, 48, 200 * ratio, 3, 1);
+    c.add(progressBar);
 
     if (unlocked) {
       c.add(this.add.image(58, 28, 'star-sm'));

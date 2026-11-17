@@ -2,8 +2,16 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#141a33" />
+    <!-- Móvil: se puede añadir a la pantalla de inicio y se abre a pantalla completa, en vertical -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Vertical Golf" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
     <title>Vertical Golf</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,8 +26,19 @@
         touch-action: none;
         -webkit-user-select: none;
         user-select: none;
+        /* sin "tirar para recargar", rebote ni menú de pulsación larga en el móvil */
+        overscroll-behavior: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
-      #game { width: 100%; height: 100%; }
+      body { position: fixed; inset: 0; }
+      #game {
+        width: 100%;
+        height: 100%;
+        /* respeta la muesca y la barra inferior de los móviles */
+        box-sizing: border-box;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
       canvas { image-rendering: pixelated; box-shadow: 0 0 80px rgba(0, 0, 0, 0.6); }
     </style>
   </head>

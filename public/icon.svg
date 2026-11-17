@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="crispEdges">
+  <!-- Icono pixel art: cielo, isla con césped, bandera y bola -->
+  <rect width="64" height="64" fill="#a6dcf7"/>
+  <rect y="32" width="64" height="32" fill="#90cdf0"/>
+  <rect x="8" y="44" width="48" height="4" fill="#7ed957"/>
+  <rect x="8" y="48" width="48" height="8" fill="#c08552"/>
+  <rect x="8" y="43" width="48" height="1" fill="#2f2a2c"/>
+  <rect x="40" y="16" width="2" height="28" fill="#3a3550"/>
+  <rect x="42" y="16" width="12" height="8" fill="#ef4d5e"/>
+  <rect x="18" y="32" width="8" height="8" fill="#ffffff"/>
+  <rect x="17" y="33" width="10" height="6" fill="#ffffff"/>
+  <rect x="20" y="34" width="2" height="2" fill="#d3d8e6"/>
+</svg>

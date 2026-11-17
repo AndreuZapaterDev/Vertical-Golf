@@ -61,7 +61,7 @@ export const MATERIALS: Record<MaterialKey, Material> = {
   wood: { friction: 0.6, restitution: 0.3, damp: 3, power: 1, dust: hex('#a9f07a') },
   mushroom: { friction: 0.6, restitution: 0.8, damp: 2, power: 1.4, dust: hex('#ff9aa2') },
   crumble: { friction: 0.6, restitution: 0.3, damp: 3, power: 1, dust: hex('#dc9b67') },
-  bounds: { friction: 0.1, restitution: 0.45, damp: 2, power: 1, dust: hex('#ffffff') },
+  bounds: { friction: 0.1, restitution: 0.55, damp: 2, power: 1, dust: hex('#ffffff') },
 };
 
 /**

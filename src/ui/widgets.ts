@@ -110,7 +110,8 @@ export function iconButton(scene: Phaser.Scene, x: number, y: number, icon: stri
   const c = Object.assign(scene.add.container(x, y), { icon: img });
   const bg = scene.add.nineslice(0, 0, 'btn9-white', 0, 17, 18, 5, 5, 5, 7);
   c.add([bg, img]);
-  c.setSize(17, 18);
+  // zona táctil más grande que el dibujo (en el móvil el botón mide ~28 px)
+  c.setSize(26, 26);
   c.setInteractive({ useHandCursor: true });
   pressable(scene, c, onClick);
   return c;

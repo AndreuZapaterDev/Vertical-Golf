@@ -21,6 +21,10 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   width: W * VIEW.Z,
   height: H * VIEW.Z,
   backgroundColor: '#141a33',
+  // sin menú contextual (clic derecho / pulsación larga en el móvil)
+  disableContextMenu: true,
+  // dos dedos a la vez (mover el mapa en el móvil)
+  input: { activePointers: 2 },
   pixelArt: true,
   // En Phaser 4 el valor por defecto pasó a false: lo fijamos para que el pixel art no tiemble
   roundPixels: true,

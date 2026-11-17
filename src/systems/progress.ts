@@ -1,9 +1,22 @@
 import { UPGRADES, SKINS, ECONOMY, upgradeDef, type UpgradeId } from '../data/upgrades';
-import { TRAILS, DEFAULT_TRAIL, PRIZES, RARITIES, GACHA, type Prize, type Rarity } from '../data/cosmetics';
+import { TRAILS, DEFAULT_TRAIL, BALL_TYPES, DEFAULT_BALL, PRIZES, RARITIES, GACHA, type Prize, type PrizeKind, type Rarity } from '../data/cosmetics';
 import { LEVELS } from '../data/levels';
 import { WORLDS } from '../data/worlds';
 
 const LEVEL_IDS = new Set(LEVELS.map((l) => l.id));
+const devGachaPulls = new Set<string>();
+const BALL_ID_MIGRATIONS: Record<string, string> = {
+  big: 'heavy',
+  cork: 'feather',
+  gum: 'bouncy',
+  disk: 'slick',
+};
+
+function migratedBallId(id: unknown): string | null {
+  if (typeof id !== 'string') return null;
+  const nextId = BALL_ID_MIGRATIONS[id] ?? id;
+  return BALL_TYPES.some((ball) => ball.id === nextId) ? nextId : null;
+}
 
 export interface Settings {
   /** volumen 0–1 */
@@ -22,14 +35,17 @@ interface SaveState {
   levels: Record<string, LevelResult>;
   coins: number;
   upgrades: Partial<Record<UpgradeId, number>>;
-  /** mejoras compradas que el jugador ha apagado (conservan su nivel) */
-  disabled: UpgradeId[];
+  /** nivel elegido para usar cada mejora; 0 significa desactivada */
+  activeUpgradeLevels: Partial<Record<UpgradeId, number>>;
   /** fichas para el gachapón */
   tokens: number;
   trails: string[];
   trail: string;
   skins: string[];
   skin: string;
+  /** tipos de pelota (física) */
+  balls: string[];
+  ball: string;
   settings: Settings;
 }
 
@@ -39,7 +55,7 @@ export interface CoinLine {
 }
 
 /**
- * Progreso local (localStorage): niveles, monedas, mejoras, bolas y ajustes.
+ * Progreso local (localStorage): niveles, monedas, mejoras, pelotas, skins, rastros y ajustes.
  * Cuando haya login con Supabase se puede sincronizar este mismo objeto con una tabla `progress`.
  *
  * El guardado se valida al cargar (valores corruptos → valores por defecto) y se escribe
@@ -51,7 +67,7 @@ const BACKUP = `${KEY}:backup`;
 const DEFAULT_SETTINGS: Settings = { music: 0.6, sfx: 1, vibration: true, shake: true };
 
 const fresh = (): SaveState => ({
-  levels: {}, coins: 0, upgrades: {}, disabled: [], tokens: 0, trails: [DEFAULT_TRAIL], trail: DEFAULT_TRAIL, skins: ['classic'], skin: 'classic', settings: { ...DEFAULT_SETTINGS },
+  levels: {}, coins: 0, upgrades: {}, activeUpgradeLevels: {}, tokens: 0, trails: [DEFAULT_TRAIL], trail: DEFAULT_TRAIL, skins: ['classic'], skin: 'classic', balls: [DEFAULT_BALL], ball: DEFAULT_BALL, settings: { ...DEFAULT_SETTINGS },
 });
 
 const num = (v: unknown, def: number, min = 0, max = Infinity) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def);
@@ -81,12 +97,28 @@ function sanitize(p: any): SaveState {
       if (Number.isInteger(lv)) s.upgrades[u.id] = Math.min(Math.max(0, lv), u.values.length - 1);
     }
   }
+  const legacyDisabled = Array.isArray(p.disabled) ? p.disabled : [];
+  const activeLevels = p.activeUpgradeLevels && typeof p.activeUpgradeLevels === 'object' ? p.activeUpgradeLevels : {};
+  for (const u of UPGRADES) {
+    const purchased = s.upgrades[u.id] ?? 0;
+    const savedLevel = activeLevels[u.id];
+    const defaultLevel = legacyDisabled.includes(u.id) ? 0 : purchased;
+    s.activeUpgradeLevels[u.id] = Number.isInteger(savedLevel)
+      ? Math.min(purchased, Math.max(0, savedLevel))
+      : defaultLevel;
+  }
   s.tokens = Math.round(num(p.tokens, 0, 0));
   if (Array.isArray(p.trails)) s.trails = [...new Set<string>([DEFAULT_TRAIL, ...p.trails.filter((id: unknown) => TRAILS.some((t) => t.id === id))])];
   if (s.trails.includes(p.trail)) s.trail = p.trail;
-  if (Array.isArray(p.disabled)) s.disabled = UPGRADES.map((u) => u.id).filter((id) => p.disabled.includes(id));
   if (Array.isArray(p.skins)) s.skins = [...new Set<string>(['classic', ...p.skins.filter((id: unknown) => SKINS.some((k) => k.id === id))])];
   if (s.skins.includes(p.skin)) s.skin = p.skin;
+  if (Array.isArray(p.balls)) {
+    const savedBalls: unknown[] = p.balls;
+    const balls = savedBalls.map(migratedBallId).filter((id): id is string => id !== null);
+    s.balls = [...new Set<string>([DEFAULT_BALL, ...balls])];
+  }
+  const equippedBall = migratedBallId(p.ball);
+  if (equippedBall && s.balls.includes(equippedBall)) s.ball = equippedBall;
 
   // Ajustes (migración: la versión anterior solo tenía `sound: true/false`)
   const st = p.settings && typeof p.settings === 'object' ? p.settings : {};
@@ -139,6 +171,9 @@ function save() {
   }
 }
 
+/** Lista guardada de lo conseguido de cada categoría */
+const ownedList = (kind: PrizeKind): string[] => (kind === 'skin' ? state.skins : kind === 'ball' ? state.balls : state.trails);
+
 type SettingsListener = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 const listeners = new Set<SettingsListener>();
 
@@ -148,7 +183,9 @@ export const progress = {
     return dev;
   },
   setDevMode(on: boolean) {
-    dev = !!on;
+    const enabled = !!on;
+    if (enabled !== dev) devGachaPulls.clear();
+    dev = enabled;
     try {
       if (dev) localStorage.setItem(DEV_KEY, '1');
       else localStorage.removeItem(DEV_KEY);
@@ -233,21 +270,24 @@ export const progress = {
   upgradeLevel(id: UpgradeId): number {
     return state.upgrades[id] || 0;
   },
-  /** Valor actual de la mejora (p. ej. multiplicador de potencia). Apagada = valor base. */
+  /** Nivel de mejora elegido para usar; 0 significa que está desactivada. */
+  upgradeActiveLevel(id: UpgradeId): number {
+    return state.activeUpgradeLevels[id] ?? 0;
+  },
+  /** Valor actual de la mejora (p. ej. multiplicador de potencia). */
   stat(id: UpgradeId): number {
     const u = upgradeDef(id);
-    if (!this.isUpgradeOn(id)) return u.values[0];
-    return u.values[Math.min(this.upgradeLevel(id), u.values.length - 1)];
+    return u.values[Math.min(this.upgradeActiveLevel(id), this.upgradeLevel(id), u.values.length - 1)];
   },
-  /** ¿Está activa? (las que no se han comprado cuentan como activas, pero no hacen nada) */
+  /** ¿Está activa? */
   isUpgradeOn(id: UpgradeId): boolean {
-    return !state.disabled.includes(id);
+    return this.upgradeActiveLevel(id) > 0;
   },
-  /** Enciende o apaga una mejora comprada */
-  toggleUpgrade(id: UpgradeId): boolean {
-    if (!this.upgradeLevel(id)) return false;
-    if (this.isUpgradeOn(id)) state.disabled.push(id);
-    else state.disabled = state.disabled.filter((d) => d !== id);
+  /** Elige el nivel comprado que se usará (0 la desactiva). */
+  setUpgradeActiveLevel(id: UpgradeId, level: number): boolean {
+    if (!Number.isInteger(level) || level < 0 || level > this.upgradeLevel(id)) return false;
+    if (this.upgradeActiveLevel(id) === level) return true;
+    state.activeUpgradeLevels[id] = level;
     save();
     return true;
   },
@@ -260,7 +300,7 @@ export const progress = {
     if (cost == null || this.coins < cost) return false;
     if (!dev) state.coins -= cost;
     state.upgrades[id] = this.upgradeLevel(id) + 1;
-    state.disabled = state.disabled.filter((d) => d !== id); // al mejorarla, se enciende
+    state.activeUpgradeLevels[id] = this.upgradeLevel(id); // al mejorarla, se activa el nuevo nivel
     save();
     return true;
   },
@@ -282,6 +322,28 @@ export const progress = {
     return true;
   },
 
+  // ---- tipos de pelota
+  get ball(): string {
+    return this.ownsBall(state.ball) ? state.ball : DEFAULT_BALL;
+  },
+  ownsBall(id: string): boolean {
+    return dev || state.balls.includes(id);
+  },
+  equipBall(id: string): boolean {
+    if (!this.ownsBall(id)) return false;
+    state.ball = id;
+    save();
+    return true;
+  },
+
+  /** Tienes este premio? / equípalo (sea del tipo que sea) */
+  owns(kind: PrizeKind, id: string): boolean {
+    return kind === 'skin' ? this.ownsSkin(id) : kind === 'ball' ? this.ownsBall(id) : this.ownsTrail(id);
+  },
+  equip(kind: PrizeKind, id: string): boolean {
+    return kind === 'skin' ? this.equipSkin(id) : kind === 'ball' ? this.equipBall(id) : this.equipTrail(id);
+  },
+
   // ---- rastros
   get trail(): string {
     return this.ownsTrail(state.trail) ? state.trail : DEFAULT_TRAIL;
@@ -297,43 +359,83 @@ export const progress = {
   },
 
   // ---- gachapón
-  canPull(): boolean {
-    return this.tokens >= GACHA.cost;
+  /**
+   * Premios que aún no tienes: solo estos pueden salir (nunca hay repetidos).
+   * En modo DEV se mira el progreso real, para poder probar las tiradas.
+   */
+  remainingPrizes(): Prize[] {
+    return PRIZES.filter((p) =>
+      !ownedList(p.kind).includes(p.id) && !(dev && devGachaPulls.has(`${p.kind}:${p.id}`)),
+    );
+  },
+  /** ¿Ha salido este premio del gachapón? Independiente de los desbloqueos gratis de DEV. */
+  hasGachaPrize(kind: PrizeKind, id: string): boolean {
+    return !this.remainingPrizes().some((p) => p.kind === kind && p.id === id);
   },
   /**
-   * Tira del gachapón: gasta fichas, sortea la rareza por pesos y luego un premio de esa rareza.
-   * Si ya lo tenías, devuelve parte de las fichas. Devuelve null si no hay fichas suficientes.
+   * Probabilidad actual de cada rareza (0–1) y cuántos premios le quedan.
+   * Cada premio restante tiene la misma probabilidad; la rareza depende de su proporción del bombo.
    */
-  pull(): { prize: Prize; isNew: boolean; refund: number } | null {
+  odds(): Record<Rarity, { chance: number; left: number; total: number }> {
+    const left = this.remainingPrizes();
+    const keys = Object.keys(RARITIES) as Rarity[];
+    const count = (r: Rarity, list: Prize[]) => list.filter((p) => p.rarity === r).length;
+    const leftByRarity = keys.map((r) => count(r, left));
+    const totalByRarity = keys.map((r) => count(r, PRIZES));
+    const out = {} as Record<Rarity, { chance: number; left: number; total: number }>;
+    for (const [i, r] of keys.entries()) {
+      out[r] = {
+        chance: left.length ? leftByRarity[i] / left.length : 0,
+        left: leftByRarity[i],
+        total: totalByRarity[i],
+      };
+    }
+    return out;
+  },
+  /** Progreso del bombo, excluyendo desbloqueos gratis del modo DEV. */
+  gachaCollected(): { have: number; total: number } {
+    const total = PRIZES.length;
+    return { have: total - this.remainingPrizes().length, total };
+  },
+  /** ¿Ya salió todo lo del gachapón? */
+  gachaComplete(): boolean {
+    return this.remainingPrizes().length === 0;
+  },
+  canPull(): boolean {
+    return this.tokens >= GACHA.cost && !this.gachaComplete();
+  },
+  /**
+   * Tira del gachapón: gasta fichas, sortea la rareza con las probabilidades actuales y luego
+   * uno de los premios que te faltan de esa rareza. Devuelve null si no se puede tirar.
+   */
+  pull(): Prize | null {
     if (!this.canPull()) return null;
-    if (!dev) state.tokens -= GACHA.cost;
-    const rarities = (Object.keys(RARITIES) as Rarity[]).filter((r) => PRIZES.some((p) => p.rarity === r));
-    const total = rarities.reduce((s, r) => s + RARITIES[r].weight, 0);
-    let roll = Math.random() * total;
-    let rarity = rarities[0];
+    const odds = this.odds();
+    const rarities = (Object.keys(odds) as Rarity[]).filter((r) => odds[r].left > 0);
+    let roll = Math.random();
+    let rarity = rarities[rarities.length - 1];
     for (const r of rarities) {
-      roll -= RARITIES[r].weight;
+      roll -= odds[r].chance;
       if (roll < 0) {
         rarity = r;
         break;
       }
     }
-    const pool = PRIZES.filter((p) => p.rarity === rarity);
+    const pool = this.remainingPrizes().filter((p) => p.rarity === rarity);
     const prize = pool[Math.floor(Math.random() * pool.length)];
-    const owned = prize.kind === 'skin' ? state.skins : state.trails;
-    const isNew = !owned.includes(prize.id);
-    let refund = 0;
-    if (isNew) owned.push(prize.id);
-    else if (!dev) {
-      refund = GACHA.refund;
-      state.tokens += refund;
+    // En modo DEV se simula la colección de la sesión, sin gastar ni guardar progreso.
+    if (dev) {
+      devGachaPulls.add(`${prize.kind}:${prize.id}`);
+      return prize;
     }
+    state.tokens -= GACHA.cost;
+    ownedList(prize.kind).push(prize.id);
     save();
-    return { prize, isNew, refund };
+    return prize;
   },
   /** Cuántos premios del gachapón tienes ya (para el contador de la colección) */
   collected(): { have: number; total: number } {
-    const have = PRIZES.filter((p) => (p.kind === 'skin' ? state.skins : state.trails).includes(p.id)).length;
+    const have = PRIZES.filter((p) => this.owns(p.kind, p.id)).length;
     return { have, total: PRIZES.length };
   },
 

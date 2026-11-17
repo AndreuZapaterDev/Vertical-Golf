@@ -53,6 +53,13 @@ const rect = (c: Ctx, x: number, y: number, w: number, h: number, col: string) =
   c.fillRect(x, y, w, h);
 };
 
+function blendHex(a: string, b: string, t: number) {
+  const from = Number.parseInt(a.slice(1), 16);
+  const to = Number.parseInt(b.slice(1), 16);
+  const channel = (shift: number) => Math.round(((from >> shift) & 0xff) * (1 - t) + ((to >> shift) & 0xff) * t);
+  return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, '0')).join('')}`;
+}
+
 function mask(c: Ctx, w: number, h: number, fn: PixelFn, outline?: string | null) {
   const grid: ReturnType<PixelFn>[] = new Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) grid[y * w + x] = fn(x, y);
@@ -139,20 +146,35 @@ export function generateTextures(scene: Phaser.Scene) {
     bitmap(c, 0, 0, base, { o: '#3a3550', w: '#ffffff', h: '#ffffff', s: '#d3d8e6' });
     for (const [x, y] of dimples[f]) px(c, x, y, '#dfe3ee');
   });
-  // una textura por bola comprable (misma forma, otra paleta)
+  // una textura por bola comprable (misma forma, otra paleta o efecto)
   for (const skin of SKINS) {
     const P = skin.pal;
     makeFrames(scene, `ball-${skin.id}`, 10, 10, 4, (c, f) => {
       bitmap(c, 0, 0, base, { o: P.o, w: P.w, h: '#ffffff', s: P.s });
       const inside = (x: number, y: number) => base[y][x] === 'w' || base[y][x] === 's';
-      if (skin.pattern === 'stripes') for (const x of [3, 6]) for (let y = 1; y < 9; y++) if (inside(x, y)) px(c, x, y, P.d);
-      if (skin.pattern === 'dots') {
+      if (skin.pattern === 'stripes') {
+        for (const x of [3, 6]) for (let y = 1; y < 9; y++) if (inside(x, y)) px(c, x, y, P.d);
+      } else if (skin.pattern === 'dots') {
         // estrellitas que giran con la bola
         for (const [x, y] of [[2, 3], [6, 2], [4, 6], [7, 5], [3, 8]]) {
           const xx = 1 + ((x + f * 2) % 8);
           if (inside(xx, y)) px(c, xx, y, (x + y) % 3 ? P.d : '#ffd36b');
         }
-      } else for (const [x, y] of dimples[f]) px(c, x, y, P.d);
+      } else {
+        for (let y = 1; y < 9; y++) {
+          for (let x = 1; x < 9; x++) {
+            if (!inside(x, y)) continue;
+            if (skin.pattern === 'gradient') px(c, x, y, blendHex(P.w, P.s, (x - 1) / 7));
+            else if (skin.pattern === 'shimmer') px(c, x, y, blendHex(P.w, P.s, ((x + y + f * 3) % 10) / 9));
+            else if (skin.pattern === 'prism') {
+              const colors = [P.w, P.s, P.d, '#76f5e8', '#ff65c4'];
+              const band = Math.floor((x + y * 2 + f * 3) / 2) % colors.length;
+              px(c, x, y, colors[band]);
+            }
+          }
+        }
+        for (const [x, y] of dimples[f]) px(c, x, y, P.d);
+      }
     });
   }
 

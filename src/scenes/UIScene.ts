@@ -330,12 +330,12 @@ export default class UIScene extends Phaser.Scene {
     const hand = this.add.image(W / 2, H * 0.55, 'hand');
     // en ordenador también se explica el teclado
     const keyboard = !this.sys.game.device.input.touch && this.input.keyboard;
-    const h = keyboard ? 62 : 36;
+    const h = keyboard ? 62 : 50;
     const y = 64 + h / 2; // arriba, bajo el HUD: abajo taparía la bola en la salida
     const p = panel(this, W / 2, y, 200, h);
     const text = keyboard
       ? 'Arrastra hacia abajo y suelta\npara lanzar la bola\nTeclado: flechas + ESPACIO\nRueda pulsada: mover el mapa'
-      : 'Arrastra hacia abajo y suelta\npara lanzar la bola';
+      : 'Arrastra hacia abajo y suelta\npara lanzar la bola\nDos dedos: mover el mapa';
     const txt = label(this, W / 2, y, text, 10, { lineSpacing: 2 });
     this.tweens.add({ targets: hand, y: { from: H * 0.5, to: H * 0.66 }, alpha: { from: 1, to: 0.3 }, duration: 900, repeat: -1, repeatDelay: 300, ease: 'Cubic.easeInOut' });
     this.tutorial = [hand, p, txt];
@@ -409,9 +409,14 @@ export default class UIScene extends Phaser.Scene {
 
     // Monedas ganadas (contador animado + desglose)
     p.add(panel(this, 0, 12, 150, 22, 'hud9'));
-    const coinIcon = this.add.image(-30, 12, 'coin');
-    const coinText = label(this, -22, 12, '+0', 13, { ox: 0, color: PAL.sand });
+    const coinIcon = this.add.image(-50, 12, 'coin');
+    const coinText = label(this, -42, 12, '+0', 13, { ox: 0, color: PAL.sand });
     p.add([coinIcon, coinText]);
+    // fichas del gachapón
+    const tokIcon = this.add.image(22, 12, 'token');
+    const tokText = label(this, 30, 12, `+${r.tokens}`, 13, { ox: 0, color: '#d8b8ff' });
+    p.add([tokIcon, tokText]);
+    this.tweens.add({ targets: tokIcon, scale: { from: 1.8, to: 1 }, duration: 400, delay: 700, ease: 'Back.easeOut' });
     const detail = (r.coinLines || []).map((l) => `${l.label} +${l.amount}`).join('  ·  ');
     p.add(label(this, 0, 31, detail, 7, { color: '#f0dcc0', strokeThickness: 2, wrap: 190 }));
 
@@ -457,7 +462,7 @@ export default class UIScene extends Phaser.Scene {
         },
         onComplete: () => {
           this.tweens.add({ targets: coinIcon, scale: { from: 1.8, to: 1 }, duration: 300, ease: 'Back.easeOut' });
-          this.sparks.explode(10, W / 2 - 30, py + 12);
+          this.sparks.explode(10, W / 2 - 50, py + 12);
         },
       });
     });
