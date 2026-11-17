@@ -20,6 +20,8 @@ export const POWERS = Array.from({ length: 19 }, (_, i) => 0.1 + i * 0.05);
 const W5 = [1, 4, 6, 4, 1];
 const NOISE = W5.flatMap((wa, i) => W5.map((wp, j) => [i - 2, j - 2, wa * wp] as const));
 const NOISE_SUM = 256;
+/** potencia máxima "cómoda": deja margen por arriba para corregir */
+export const COMFORT_POWER = 0.85;
 
 type Res = { k: 'sink' } | { k: 'pen'; why: string } | { k: 'node'; id: number };
 
@@ -52,6 +54,8 @@ export interface Report {
   capped: boolean;
   minStrokes: number;
   expected: number;
+  /** golpes esperados de un jugador real que no pasa del ${COMFORT_POWER * 100} % de potencia */
+  comfortExpected: number;
   suggestedPar: number;
   route: Step[];
   deadEnds: Node[];
@@ -140,13 +144,13 @@ export async function explore(L: ParsedLevel, shooter: Shooter, { maxNodes = 700
 
   // Golpes esperados con error (iteración de valores)
   const E = nodes.map(() => 60);
-  const value = (n: Node, fi: number, ai: number, pi: number, En: number) => {
+  const value = (n: Node, fi: number, ai: number, pi: number, En: number, EE: number[] = E) => {
     let s = 0;
     for (const [da, dp, w] of NOISE) {
       const a = Math.min(ANGLES.length - 1, Math.max(0, ai + da));
       const p = Math.min(POWERS.length - 1, Math.max(0, pi + dp));
       const r = n.out![fi][a][p];
-      s += w * (r.k === 'sink' ? 0 : r.k === 'pen' ? 1 + En : r.id === n.id ? En : E[r.id]);
+      s += w * (r.k === 'sink' ? 0 : r.k === 'pen' ? 1 + En : r.id === n.id ? En : EE[r.id]);
     }
     return s / NOISE_SUM;
   };
@@ -160,6 +164,24 @@ export async function explore(L: ParsedLevel, shooter: Shooter, { maxNodes = 700
       const v = Math.min(60, 1 + b);
       delta = Math.max(delta, Math.abs(v - E[n.id]));
       E[n.id] = v;
+    }
+    if (delta < 1e-4) break;
+  }
+
+  // Comodidad: los mismos golpes esperados, pero sin pasar del 85 % de potencia. Si sale mucho peor, el hoyo
+  // obliga a ir siempre al límite (saltos demasiado altos o lejanos) y no es cómodo de jugar.
+  const maxPi = POWERS.reduce((m, p, i) => (p <= COMFORT_POWER + 1e-9 ? i : m), 0);
+  const E2 = nodes.map(() => 60);
+  for (let it = 0; it < 400; it++) {
+    let delta = 0;
+    for (const n of nodes) {
+      if (!n.out) continue;
+      let b = INF;
+      for (let fi = 0; fi < n.out.length; fi++)
+        for (let ai = 0; ai < ANGLES.length; ai++) for (let pi = 0; pi <= maxPi; pi++) b = Math.min(b, value(n, fi, ai, pi, E2[n.id], E2));
+      const v = Math.min(60, 1 + b);
+      delta = Math.max(delta, Math.abs(v - E2[n.id]));
+      E2[n.id] = v;
     }
     if (delta < 1e-4) break;
   }
@@ -196,10 +218,11 @@ export async function explore(L: ParsedLevel, shooter: Shooter, { maxNodes = 700
   const deadEnds = nodes.filter((n) => n.out && best[n.id] >= INF);
 
   const expected = E[start.id];
+  const comfortExpected = E2[start.id];
   return {
     id: L.id, name: L.name, par: L.par, nodes: nodes.length, capped,
     minStrokes: best[start.id] >= INF ? Infinity : best[start.id],
-    expected,
+    expected, comfortExpected,
     // par = golpes de un jugador real, redondeado (nunca menos que el mínimo + 1 si hay más de un golpe)
     suggestedPar: Math.max(best[start.id] >= INF ? 0 : best[start.id], Math.round(expected)),
     route, deadEnds, ms: performance.now() - t0, shots,

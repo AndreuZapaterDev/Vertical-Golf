@@ -11,7 +11,7 @@
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { cpus } from 'node:os';
 import { LEVELS, parseLevel } from '../src/data/levels';
-import { explore, drawRoute, shootGrid, type Report } from './mapcheck/explore';
+import { explore, drawRoute, shootGrid, COMFORT_POWER, type Report } from './mapcheck/explore';
 import { LevelSim, type Rest, type Outcome } from './mapcheck/sim';
 
 interface Job { id: number; index: number; rest: Rest }
@@ -26,7 +26,10 @@ function describe(rep: Report, withMap: boolean, index: number): Result {
   const ok = Number.isFinite(rep.minStrokes) && rep.deadEnds.length === 0 && !rep.capped;
   const shaky = rep.route.filter((s) => s.reliability < 0.5 || s.risk > 0.35);
   const parOff = rep.par !== rep.suggestedPar;
-  const warn = ok && (parOff || shaky.length > 0);
+  // margen: sin pasar del 85 % de potencia el hoyo debería seguir siendo jugable. Ojo: los golpes al 100 % son
+  // los más fáciles de ejecutar (basta tirar hasta el tope), así que solo se avisa si el 85 % lo empeora mucho.
+  const tiring = rep.comfortExpected > rep.expected * 2 + 2;
+  const warn = ok && (parOff || shaky.length > 0 || tiring);
   const tag = !ok ? 'ERROR' : warn ? 'AVISO' : 'OK';
   lines.push(`\n[${tag}] ${rep.id} · ${rep.name}`);
   if (!Number.isFinite(rep.minStrokes)) lines.push('  ✗ El hoyo NO se puede alcanzar desde la salida.');
@@ -36,6 +39,7 @@ function describe(rep: Report, withMap: boolean, index: number): Result {
         (parOff ? `  (ahora par ${rep.par})` : `  (par ${rep.par} ✓)`),
     );
   }
+  lines.push(`  margen de potencia (sin pasar del ${COMFORT_POWER * 100} % de potencia): ${rep.comfortExpected >= 59 ? 'imposible' : rep.comfortExpected.toFixed(1) + ' golpes'}` + (tiring ? '  ⚠ casi todo exige el golpe máximo: saltos muy altos o lejanos' : '  ✓'));
   if (rep.capped) lines.push('  ✗ Demasiados sitios de reposo: exploración cortada (¿islas enormes o rampas sin fondo?)');
   if (rep.deadEnds.length) lines.push(`  ✗ ${rep.deadEnds.length} sitio(s) sin salida (marcados con x): la bola puede quedarse atrapada`);
   lines.push('  ruta recomendada (ángulo sobre la horizontal: 90° = recto arriba, <90 derecha, >90 izquierda):');

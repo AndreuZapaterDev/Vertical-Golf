@@ -9,7 +9,7 @@ export const TILE = 12; // tamaño de casilla de los mapas (20 columnas)
 export const COLS = W / TILE;
 
 export const GRAVITY = 500; // px/s² (Matter gravity y = 0.5)
-export const MAX_SPEED = 360; // px/s a potencia máxima (~130 px ≈ 11 casillas de altura)
+export const MAX_SPEED = 420; // px/s a potencia máxima (~145 px ≈ 12 casillas de altura; los hoyos se diseñan para saltos de 6–7 filas con ~80 % de potencia)
 export const MAX_DRAG = 64; // px lógicos de arrastre para potencia máxima
 export const FOLLOW_OFFSET = 40;
 export const BALL_R = 5;

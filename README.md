@@ -93,7 +93,7 @@ El juego se organiza en mundos, cada uno con su aspecto, su música y sus hoyos:
 
 | Mundo | Estado | Mecánicas |
 |---|---|---|
-| **Pradera** (campo de golf) | 9 hoyos, validados con `npm run maps` | rampas, rough, agua, búnker, setas, plataformas móviles, viento |
+| **Pradera** (campo de golf) | 9 hoyos largos (pares 9–18), validados con `npm run maps` | rampas, rough, agua, búnker, setas, plataformas móviles, viento |
 | **Playa** | próximamente | — |
 | **Pantano** | próximamente | — |
 
@@ -137,7 +137,7 @@ desde cada sitio donde puede quedar parada la bola, con una cuenta nueva (sin me
 - la ruta recomendada, con la fiabilidad y el riesgo de cada golpe (avisa de golpes demasiado precisos o arriesgados)
 
 ```bash
-npm run maps                  # todos los hoyos (unos 3 min)
+npm run maps                  # todos los hoyos (unos 8-14 min con hoyos largos; uno solo tarda 1-2 min)
 npm run maps -- meadow-3 5    # solo esos (por id o por número en la lista)
 npm run maps -- 7 --map       # además dibuja la ruta sobre el mapa (S = salida, 2, 3… = desde dónde se golpea)
 ```
@@ -145,10 +145,14 @@ npm run maps -- 7 --map       # además dibuja la ruta sobre el mapa (S = salida
 Hace falta Node ≥ 22.18 en tu máquina (no en Docker). Si cambias la física en `GameScene.tick()/update()`,
 cambia también `tools/mapcheck/sim.ts`. Las formas del terreno se comparten en `src/data/terrainShapes.ts`.
 
-Reglas que siguen los hoyos de la Pradera (alcance con potencia 70–85 %: sube 4–6 filas y avanza 7–12 columnas):
+Reglas que siguen los hoyos de la Pradera (con `MAX_SPEED` 420: un golpe al 100 % sube unas 14 filas; los saltos normales son de 6–8 filas y se resuelven con 75–100 % de potencia):
 
-- cada hoyo presenta una mecánica y la convierte en el obstáculo principal
-- saltos de la ruta normal de 4–5 filas de subida; islas de llegada anchas (9+ casillas) y sin otra isla encima
+- recorridos largos (7–17 islas, de ~50 a ~85 filas) y cada hoyo más largo que el anterior
+- cada hoyo presenta una mecánica y la repite varias veces a lo largo del recorrido
+- saltos de la ruta normal de 6–8 filas de subida; islas de llegada anchas (10+ casillas) y sin otra isla encima. Las islas deben tener grosor 2 (con 3 el hueco entre islas casi iguala a la bola)
+- los golpes al 100 % son los más fáciles de ejecutar (el arrastre se topa), así que no son un problema; lo que se vigila es la fiabilidad de cada golpe de la ruta
+- plataformas finas `=`: se atraviesan desde abajo, así que un disparo recto sube varias de golpe; conviene intercalar islas macizas o separarlas más de ~14 filas
+- setas: pon varias juntas (`MMM`): el hueco de una sola casilla roza con los bordes y los disparos desde ella salen muy imprecisos. Para que la seta sea necesaria, el salto debe superar las ~14 filas que alcanza un golpe normal
 - las plataformas finas `=` solo son sólidas por arriba: se atraviesan al subir desde abajo
 - el par es el que sugiere la herramienta: golpes del jugador real redondeados
 
