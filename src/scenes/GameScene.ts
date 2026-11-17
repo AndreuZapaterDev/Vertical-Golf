@@ -605,7 +605,7 @@ export default class GameScene extends Phaser.Scene {
         body.mat = 'grass';
       }
     }
-    this.ground = (this.matter.world.localWorld.bodies as GameBody[]).find((b) => b.mat === 'grass' && b.bounds.max.y >= this.worldH - 1) || null;
+    this.ground = (this.matter.world.getAllBodies() as GameBody[]).find((b) => b.mat === 'grass' && b.bounds.max.y >= this.worldH - 1) || null;
   }
 
   buildObjects() {

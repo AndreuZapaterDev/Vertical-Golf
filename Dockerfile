@@ -8,7 +8,9 @@ FROM base AS dev
 RUN npm install
 COPY . .
 EXPOSE 5173
-CMD ["npm", "run", "dev"]
+# node_modules vive en un volumen que sobrevive a los rebuilds: se sincroniza con package.json
+# al arrancar, para que un cambio de versión (p. ej. Phaser 3 → 4) se aplique sin borrar volúmenes
+CMD ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
 
 # ---------- Build de producción ----------
 FROM base AS build

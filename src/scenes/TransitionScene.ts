@@ -60,7 +60,9 @@ export default class TransitionScene extends Phaser.Scene {
         const s = (SIZE * 0.75) * k;
         const x = c * SIZE;
         const y = r * SIZE;
-        g.fillPoints([{ x, y: y - s }, { x: x + s, y }, { x, y: y + s }, { x: x - s, y }], true);
+        // rombo = dos triángulos
+        g.fillTriangle(x, y - s, x + s, y, x, y + s);
+        g.fillTriangle(x, y - s, x, y + s, x - s, y);
       }
     }
     if (p < 1) return;
