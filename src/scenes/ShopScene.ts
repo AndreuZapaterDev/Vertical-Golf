@@ -80,10 +80,12 @@ export default class ShopScene extends Phaser.Scene {
       const cost = progress.nextCost(u.id);
       const afford = cost != null && progress.coins >= cost;
 
+      const on = progress.isUpgradeOn(u.id);
+      const active = lvl > 0 && on;
       const card = this.add.container(W / 2, y);
       card.add(panel(this, 0, 0, 228, 44, 'hud9'));
-      card.add(this.add.image(-98, -2, u.icon).setScale(lvl ? 1.5 : 1.3).setAlpha(lvl ? 1 : 0.75));
-      card.add(label(this, -82, -12, u.name, 11, { ox: 0, color: lvl ? PAL.sand : '#ffffff' }));
+      card.add(this.add.image(-98, -2, u.icon).setScale(lvl ? 1.5 : 1.3).setAlpha(active ? 1 : 0.5));
+      card.add(label(this, -82, -12, u.name, 11, { ox: 0, color: active ? PAL.sand : lvl ? '#c8bfb4' : '#ffffff' }));
       card.add(label(this, -82, 1, u.desc, 7, { ox: 0, color: CREAM, strokeThickness: 2 }));
       // pips de nivel
       for (let k = 0; k < max; k++) {
@@ -93,7 +95,19 @@ export default class ShopScene extends Phaser.Scene {
         g.fillStyle(k < lvl ? 0xb8ec6a : 0x6e5458).fillRect(px + 1, 11, 6, 4);
         card.add(g);
       }
-      card.add(label(this, -82 + max * 10 + 3, 13, u.fmt(u.values[lvl]), 7, { ox: 0, color: '#ffffff', strokeThickness: 2 }));
+      card.add(label(this, -82 + max * 10 + 3, 13, on ? u.fmt(u.values[lvl]) : 'Apagada', 7, { ox: 0, color: on ? '#ffffff' : '#c8bfb4', strokeThickness: 2 }));
+
+      // interruptor: solo para las mejoras ya compradas
+      if (lvl > 0) {
+        card.add(makeButton(this, 38, 12, {
+          color: on ? 'green' : 'gray', w: 30, h: 14, text: on ? 'ON' : 'OFF', size: 7,
+          onClick: () => {
+            progress.toggleUpgrade(u.id);
+            sfx.click();
+            this.show('upgrades');
+          },
+        }));
+      }
 
       if (cost == null) {
         card.add(label(this, 84, 0, 'MÁX', 12, { color: PAL.grassL }));

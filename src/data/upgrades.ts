@@ -1,4 +1,6 @@
-export type UpgradeId = 'power' | 'aim' | 'grip' | 'magnet' | 'brake' | 'shield' | 'gemMagnet';
+import type { Rarity } from './cosmetics';
+
+export type UpgradeId = 'power' | 'aim' | 'grip' | 'magnet' | 'brake' | 'shield';
 
 export interface Upgrade {
   id: UpgradeId;
@@ -14,14 +16,16 @@ export interface Upgrade {
 export interface Skin {
   id: string;
   name: string;
-  cost: number;
+  /** rareza en el gachapón */
+  rarity: Rarity;
   /** o = contorno, w = blanco, s = sombra, d = hoyuelos */
   pal: { o: string; w: string; s: string; d: string };
-  trail: number;
+  /** dibujo extra: rayas de sandía, puntos… */
+  pattern?: 'stripes' | 'dots';
 }
 
 /**
- * Mejoras de la cuenta y bolas comprables con monedas.
+ * Mejoras de la cuenta (se compran con monedas).
  * values[n] = efecto con n niveles comprados; costs[n] = precio del nivel n+1.
  */
 export const UPGRADES: Upgrade[] = [
@@ -55,23 +59,28 @@ export const UPGRADES: Upgrade[] = [
     costs: [60, 140], values: [0, 1, 2],
     fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
   },
-  {
-    id: 'gemMagnet', name: 'Imán de gemas', desc: 'Las gemas cercanas vienen a ti', icon: 'up-gem',
-    costs: [35, 80], values: [0, 24, 40],
-    fmt: (v) => (v ? `Radio ${v}` : 'Bloqueado'),
-  },
 ];
 
+/** Bolas: la clásica viene de serie; el resto salen del gachapón */
 export const SKINS: Skin[] = [
-  { id: 'classic', name: 'Clásica', cost: 0, pal: { o: '#3a3550', w: '#ffffff', s: '#d3d8e6', d: '#dfe3ee' }, trail: 0xffffff },
-  { id: 'fire', name: 'Fuego', cost: 100, pal: { o: '#5a1a20', w: '#ffb07a', s: '#ef4d5e', d: '#ffd8b0' }, trail: 0xff8a5c },
-  { id: 'ocean', name: 'Océano', cost: 100, pal: { o: '#1d2a5a', w: '#9cecfa', s: '#4a86e0', d: '#d4f8ff' }, trail: 0x7fe3f5 },
-  { id: 'melon', name: 'Sandía', cost: 120, pal: { o: '#1d4a2a', w: '#9be06a', s: '#3c9a46', d: '#2c6a34' }, trail: 0x86d35a },
-  { id: 'gold', name: 'Dorada', cost: 180, pal: { o: '#7a4a10', w: '#ffe9a0', s: '#f2b43a', d: '#fff6cc' }, trail: 0xffd36b },
-  { id: 'shadow', name: 'Sombra', cost: 220, pal: { o: '#0d0a18', w: '#5a4f80', s: '#2a2240', d: '#a898e0' }, trail: 0xa898e0 },
+  { id: 'classic', name: 'Clásica', rarity: 'common', pal: { o: '#3a3550', w: '#ffffff', s: '#d3d8e6', d: '#dfe3ee' } },
+  { id: 'peach', name: 'Melocotón', rarity: 'common', pal: { o: '#5a2a30', w: '#ffd8c0', s: '#ff9a7a', d: '#ffe8dc' } },
+  { id: 'mint', name: 'Menta', rarity: 'common', pal: { o: '#1d4a3a', w: '#d0ffe8', s: '#5ee0a0', d: '#a0f0c8' } },
+  { id: 'fire', name: 'Fuego', rarity: 'rare', pal: { o: '#5a1a20', w: '#ffb07a', s: '#ef4d5e', d: '#ffd8b0' } },
+  { id: 'ocean', name: 'Océano', rarity: 'rare', pal: { o: '#1d2a5a', w: '#9cecfa', s: '#4a86e0', d: '#d4f8ff' } },
+  { id: 'melon', name: 'Sandía', rarity: 'rare', pal: { o: '#1d4a2a', w: '#9be06a', s: '#3c9a46', d: '#2c6a34' }, pattern: 'stripes' },
+  { id: 'candy', name: 'Caramelo', rarity: 'epic', pal: { o: '#5a1a40', w: '#ffffff', s: '#ff9ab0', d: '#ef4d5e' }, pattern: 'stripes' },
+  { id: 'shadow', name: 'Sombra', rarity: 'epic', pal: { o: '#0d0a18', w: '#5a4f80', s: '#2a2240', d: '#a898e0' } },
+  { id: 'gold', name: 'Dorada', rarity: 'legendary', pal: { o: '#7a4a10', w: '#ffe9a0', s: '#f2b43a', d: '#fff6cc' } },
+  { id: 'galaxy', name: 'Galaxia', rarity: 'legendary', pal: { o: '#0d0a28', w: '#3a2a80', s: '#1d1450', d: '#ffffff' }, pattern: 'dots' },
 ];
 
-export const ECONOMY = { complete: 5, star: 15, gem: 10, underPar: 10, holeInOne: 25 };
+/**
+ * Al terminar un hoyo:
+ *   monedas (mejoras): complete por terminar, star por cada estrella NUEVA, underPar / holeInOne
+ *   fichas (gachapón): tokens por terminar + tokens3Stars extra si es con 3 estrellas (cada vez)
+ */
+export const ECONOMY = { complete: 5, star: 15, underPar: 10, holeInOne: 25, tokens: 1, tokens3Stars: 1 };
 
 export function upgradeDef(id: UpgradeId): Upgrade {
   const u = UPGRADES.find((u) => u.id === id);

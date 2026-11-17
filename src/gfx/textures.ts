@@ -144,8 +144,15 @@ export function generateTextures(scene: Phaser.Scene) {
     const P = skin.pal;
     makeFrames(scene, `ball-${skin.id}`, 10, 10, 4, (c, f) => {
       bitmap(c, 0, 0, base, { o: P.o, w: P.w, h: '#ffffff', s: P.s });
-      if (skin.id === 'melon') for (const x of [3, 6]) for (let y = 1; y < 9; y++) if (base[y][x] === 'w' || base[y][x] === 's') px(c, x, y, P.d);
-      for (const [x, y] of dimples[f]) px(c, x, y, P.d);
+      const inside = (x: number, y: number) => base[y][x] === 'w' || base[y][x] === 's';
+      if (skin.pattern === 'stripes') for (const x of [3, 6]) for (let y = 1; y < 9; y++) if (inside(x, y)) px(c, x, y, P.d);
+      if (skin.pattern === 'dots') {
+        // estrellitas que giran con la bola
+        for (const [x, y] of [[2, 3], [6, 2], [4, 6], [7, 5], [3, 8]]) {
+          const xx = 1 + ((x + f * 2) % 8);
+          if (inside(xx, y)) px(c, xx, y, (x + y) % 3 ? P.d : '#ffd36b');
+        }
+      } else for (const [x, y] of dimples[f]) px(c, x, y, P.d);
     });
   }
 
@@ -154,6 +161,20 @@ export function generateTextures(scene: Phaser.Scene) {
     bitmap(c, 0, 0, [
       '..ooooo..', '.oyyyyyo.', 'oywwyyydo', 'oywyyyydo', 'oyyyyyydo', 'oyyyyyydo', 'oyyyyyddo', '.oddddddo', '..ooooo..',
     ], { o: '#7a4a10', y: '#ffd36b', w: '#fff6cc', d: '#e0962a' }),
+  );
+
+  // ficha del gachapón
+  make(scene, 'token', 9, 9, (c) =>
+    bitmap(c, 0, 0, [
+      '..ooooo..', '.oppppqo.', 'oppwppqqo', 'opwwwpqqo', 'oppwppqqo', 'opppppqqo', 'oqpppqqqo', '.oqqqqqo.', '..ooooo..',
+    ], { o: '#3a1d5a', p: '#b47aff', q: '#7a4ad0', w: '#ffffff' }),
+  );
+  // cápsula del gachapón (mitad de color arriba, blanca abajo); se tiñe la de arriba aparte
+  make(scene, 'capsule-top', 22, 11, (c) =>
+    mask(c, 22, 11, (x, y) => (Math.hypot(x + 0.5 - 11, y + 0.5 - 11) <= 10 ? (Math.hypot(x - 7, y - 4) < 3 ? '#ffffff' : '#e8e8e8') : null), '#35282c'),
+  );
+  make(scene, 'capsule-bottom', 22, 11, (c) =>
+    mask(c, 22, 11, (x, y) => (Math.hypot(x + 0.5 - 11, y + 0.5) <= 10 ? (y > 6 ? '#d8d0d8' : '#fff8ec') : null), '#35282c'),
   );
 
   // iconos de las mejoras (13×13)

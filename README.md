@@ -53,8 +53,9 @@ zoom entero, así el arte se ve nítido y los textos van a alta resolución.
 
 ## Progresión (monedas y mejoras)
 
-Al completar un hoyo se ganan monedas: +5 por terminar, +15 por cada estrella nueva, +10 por cada gema
-nueva, +10 bajo par y +25 por hoyo en uno. Se gastan en la tienda (**Mejoras**):
+Cada vez que completas un hoyo ganas monedas: +10 por terminarlo, +15 extra si lo haces con 3 estrellas,
++10 bajo par y +25 por hoyo en uno. Se gastan en la tienda (**Mejoras**). Las mejoras compradas se pueden
+encender y apagar desde la tienda (ON/OFF) sin perder los niveles:
 
 | Mejora | Efecto |
 |---|---|
@@ -63,8 +64,7 @@ nueva, +10 bajo par y +25 por hoyo en uno. Se gastan en la tienda (**Mejoras**):
 | Agarre | La bola frena antes al aterrizar |
 | Imán de hoyo | El hoyo atrae la bola desde más lejos |
 | Freno aéreo | Botón (o ESPACIO) que frena la bola en el aire, 1–3 usos por hoyo |
-| Salvavidas | Anula la penalización de agua/sierras, 1–2 por hoyo |
-| Imán de gemas | Las gemas cercanas vuelan hacia la bola |
+| Salvavidas | Anula la penalización de agua/sierras/caídas, 1–2 por hoyo |
 
 También hay 6 bolas comprables, cada una con su estela. Precios y valores en `src/data/upgrades.ts`;
 el guardado (localStorage) en `src/systems/progress.ts`.
@@ -102,7 +102,7 @@ Para que llene la pantalla, el mapa debe tener **33 filas o más**.
 | i | hielo | W | agua (+1 golpe) |
 | M | seta saltarina (golpe ×1.4) | P | plataforma móvil |
 | C | bloque frágil | O | bumper |
-| X / Y | sierra fija / móvil | * | gema |
+| X / Y | sierra fija / móvil | | |
 | S | salida | H | hoyo |
 
 Física **Matter.js**: todo el terreno es sólido por todos lados; las casillas se fusionan en

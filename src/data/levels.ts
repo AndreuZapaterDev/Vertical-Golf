@@ -11,7 +11,7 @@ import { WORLDS } from './worlds';
  *   s  arena (búnker)   i  hielo                 W  agua (penalización)
  *   M  seta saltarina   P  plataforma móvil      C  bloque frágil
  *   O  bumper           X  sierra                Y  sierra móvil
- *   *  gema             S  salida                H  hoyo
+ *   S  salida           H  hoyo
  */
 
 export type MechanicKey = keyof typeof MECHANICS;
@@ -64,7 +64,6 @@ export interface ParsedLevel extends LevelMeta {
   groundRow: number;
   start: Cell;
   hole: Cell;
-  gems: Cell[];
   saws: Saw[];
   bumpers: Cell[];
   mushrooms: Cell[];
@@ -135,7 +134,7 @@ export function parseLevel(index: number): ParsedLevel {
   const cols = open ? inner : COLS;
   const grid: string[][] = [];
   const objects = {
-    gems: [] as Cell[], saws: [] as Saw[], bumpers: [] as Cell[], mushrooms: [] as Cell[], movers: [] as Span[], crumbles: [] as Span[],
+    saws: [] as Saw[], bumpers: [] as Cell[], mushrooms: [] as Cell[], movers: [] as Span[], crumbles: [] as Span[],
   };
   let start: Cell | null = null;
   let hole: Cell | null = null;
@@ -149,7 +148,6 @@ export function parseLevel(index: number): ParsedLevel {
       const cell = { c, r };
       if (ch === 'S') start = cell;
       else if (ch === 'H') hole = cell;
-      else if (ch === '*') objects.gems.push(cell);
       else if (ch === 'X') objects.saws.push({ ...cell, range: 0 });
       else if (ch === 'Y') objects.saws.push({ ...cell, range: 30 });
       else if (ch === 'O') objects.bumpers.push(cell);

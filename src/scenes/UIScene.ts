@@ -37,7 +37,6 @@ export default class UIScene extends Phaser.Scene {
   onHidden!: () => void;
 
   strokesText!: Phaser.GameObjects.Text;
-  gemIcons: Phaser.GameObjects.Image[] = [];
   sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   shieldIcon?: Phaser.GameObjects.Image;
   shieldText?: Phaser.GameObjects.Text;
@@ -65,7 +64,6 @@ export default class UIScene extends Phaser.Scene {
     this.completeAction = null;
     this.tutorial = null;
     this.introCard = null;
-    this.gemIcons = [];
     this.shieldIcon = undefined;
     this.brakeBtn = undefined;
   }
@@ -90,7 +88,6 @@ export default class UIScene extends Phaser.Scene {
     iconButton(this, W - 13, 15, 'pause', () => this.pause());
     iconButton(this, W - 33, 15, 'restart', () => this.gs.restartLevel());
 
-    this.gemIcons = Array.from({ length: I.gemsTotal }, (_, i) => this.add.image(10 + i * 11, 36, 'gem').setTint(0x6e5458).setAlpha(0.9));
 
     if (I.wind) {
       const n = Math.abs(I.wind) >= 45 ? 3 : 2;
@@ -110,7 +107,6 @@ export default class UIScene extends Phaser.Scene {
     this.bus.on('progress', this.onProgress, this);
     this.bus.on('play', this.onPlay, this);
     this.bus.on('shot', this.onShot, this);
-    this.bus.on('gem', this.onGem, this);
     this.bus.on('toast', this.showToast, this);
     this.bus.on('complete', this.showComplete, this);
     this.bus.on('brake', this.onBrake, this);
@@ -199,10 +195,10 @@ export default class UIScene extends Phaser.Scene {
   // ---------------------------------------------------------------- Habilidades
 
   buildAbilities(I: HudState) {
-    // Salvavidas: icono + contador bajo las gemas
+    // Salvavidas: icono + contador bajo el marcador del hoyo
     if (I.shields > 0) {
-      this.shieldIcon = this.add.image(12, 50, 'up-shield');
-      this.shieldText = label(this, 21, 50, `×${I.shields}`, 9, { ox: 0, strokeThickness: 2 });
+      this.shieldIcon = this.add.image(12, 38, 'up-shield');
+      this.shieldText = label(this, 21, 38, `×${I.shields}`, 9, { ox: 0, strokeThickness: 2 });
     }
     // Freno aéreo: botón grande abajo a la derecha (también tecla ESPACIO)
     if (I.brakes > 0) {
@@ -291,19 +287,11 @@ export default class UIScene extends Phaser.Scene {
     if (this.barBot - y > 2) this.barFill.fillStyle(hex('#b8ec6a')).fillRoundedRect(this.barX - 1.5, y, 3, this.barBot - y, 1.5);
   }
 
-  onHud({ strokes }: { strokes: number; gems: number }) {
+  onHud({ strokes }: { strokes: number }) {
     if (this.strokesText.text !== String(strokes)) {
       this.strokesText.setText(String(strokes));
       this.tweens.add({ targets: this.strokesText, scale: { from: 1.6, to: 1 }, duration: 260, ease: 'Back.easeOut' });
     }
-  }
-
-  onGem(count: number) {
-    const icon = this.gemIcons[count - 1];
-    if (!icon) return;
-    icon.clearTint().setAlpha(1);
-    this.tweens.add({ targets: icon, scale: { from: 2, to: 1 }, duration: 350, ease: 'Back.easeOut' });
-    this.sparks.explode(6, icon.x, icon.y);
   }
 
   // ---------------------------------------------------------------- Intro / tutorial / avisos
@@ -342,11 +330,11 @@ export default class UIScene extends Phaser.Scene {
     const hand = this.add.image(W / 2, H * 0.55, 'hand');
     // en ordenador también se explica el teclado
     const keyboard = !this.sys.game.device.input.touch && this.input.keyboard;
-    const h = keyboard ? 50 : 36;
+    const h = keyboard ? 62 : 36;
     const y = 64 + h / 2; // arriba, bajo el HUD: abajo taparía la bola en la salida
     const p = panel(this, W / 2, y, 200, h);
     const text = keyboard
-      ? 'Arrastra hacia abajo y suelta\npara lanzar la bola\nTeclado: flechas + ESPACIO'
+      ? 'Arrastra hacia abajo y suelta\npara lanzar la bola\nTeclado: flechas + ESPACIO\nRueda pulsada: mover el mapa'
       : 'Arrastra hacia abajo y suelta\npara lanzar la bola';
     const txt = label(this, W / 2, y, text, 10, { lineSpacing: 2 });
     this.tweens.add({ targets: hand, y: { from: H * 0.5, to: H * 0.66 }, alpha: { from: 1, to: 0.3 }, duration: 900, repeat: -1, repeatDelay: 300, ease: 'Cubic.easeInOut' });
@@ -413,8 +401,8 @@ export default class UIScene extends Phaser.Scene {
       return s;
     });
 
-    ([['Golpes', r.strokes], ['Par', r.par], ['Gemas', `${r.gems}/${r.gemsTotal}`]] as [string, string | number][]).forEach(([k, v], i) => {
-      const x = -62 + i * 62;
+    ([['Golpes', r.strokes], ['Par', r.par]] as [string, number][]).forEach(([k, v], i) => {
+      const x = -36 + i * 72;
       p.add(label(this, x, -32, k, 9, { color: '#f0dcc0', strokeThickness: 2 }));
       p.add(label(this, x, -15, String(v), 18, { weight: '700' }));
     });
