@@ -6,7 +6,9 @@ import {
 } from '../constants';
 import { LEVELS, parseLevel, type ParsedLevel, type MechanicKey } from '../data/levels';
 import { renderTerrain, renderBlock, cellSolid } from '../gfx/terrain';
+import { terrainRects, terrainRamps, thinSolidFor } from '../data/terrainShapes';
 import { tintFill } from '../gfx/tint';
+import { bakeTexture, rgba } from '../gfx/bake';
 import { sfx, music, haptic } from '../systems/audio';
 import { progress, type CoinLine } from '../systems/progress';
 import { SKINS, type Skin } from '../data/upgrades';
@@ -147,9 +149,10 @@ const T = TILE;
 
 const POWER_COLORS = [hex('#72d454'), hex('#ffd36b'), hex('#ff8a5c'), hex('#ef4d5e')];
 const powerColor = (p: number) => POWER_COLORS[Math.min(3, Math.floor(p * 4))];
+/** 12 puntos del contorno de la bola (para comprobar choques en la trayectoria sin recalcular senos y cosenos) */
+const RING = Array.from({ length: 12 }, (_, i) => [Math.cos((i / 12) * Math.PI * 2), Math.sin((i / 12) * Math.PI * 2)]);
 const SHOT_POWER_EXPONENT = 1.25;
 const shotPower = (dragLength: number) => Math.pow(Phaser.Math.Clamp(dragLength / MAX_DRAG, 0, 1), SHOT_POWER_EXPONENT);
-const FULL_MAT: Record<string, MaterialKey> = { '#': 'grass', G: 'grass', r: 'rough', s: 'sand', i: 'ice' };
 
 /**
  * Escena principal con física Matter (paso fijo de 120 Hz).
@@ -224,6 +227,8 @@ export default class GameScene extends Phaser.Scene {
   ground: MatterBody | null = null;
   movers: Mover[] = [];
   crumbles: Crumble[] = [];
+  /** plataformas finas '=' (se atraviesan desde abajo) */
+  thins: GameBody[] = [];
   bumpers: GameBody[] = [];
   saws: Phaser.GameObjects.Sprite[] = [];
   cupPos: Vec = { x: 0, y: 0 };
@@ -239,7 +244,9 @@ export default class GameScene extends Phaser.Scene {
   counter!: Phaser.GameObjects.Text;
   readyRing!: Phaser.GameObjects.Graphics;
   aimGfx!: Phaser.GameObjects.Graphics;
-  holePtr: Phaser.GameObjects.Graphics | null = null;
+  /** flecha que señala el hoyo fuera de pantalla: punta (se gira) + chapa con la bandera */
+  shadowAt = { x: -1e9, y: -1e9, on: false };
+  holePtr: { wedge: Phaser.GameObjects.Image; badge: Phaser.GameObjects.Image } | null = null;
   dust!: Phaser.GameObjects.Particles.ParticleEmitter;
   sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   confetti!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -324,6 +331,7 @@ export default class GameScene extends Phaser.Scene {
     this.trailColor = this.trail.colors[this.trail.colors.length - 1];
     this.bumpVel = null;
     this.holePtr = null;
+    this.shadowAt = { x: -1e9, y: -1e9, on: false };
     this.introTimer = null;
     this.rollFxTimer = 0;
     this.freeCam = false;
@@ -402,6 +410,7 @@ export default class GameScene extends Phaser.Scene {
       this.clouds = [];
       this.movers = [];
       this.crumbles = [];
+      this.thins = [];
       this.bumpers = [];
       this.saws = [];
       this.decor = [];
@@ -612,58 +621,17 @@ export default class GameScene extends Phaser.Scene {
   /** Cuerpos físicos: tramos de casillas fusionados (menos juntas = la bola no se engancha) */
   buildPhysics() {
     const g = this.L.grid;
-    type Key = MaterialKey | 'thin';
-    type Run = { c0: number; c1: number; r0: number; r1: number; key: Key };
-    const keyOf = (ch: string): Key | null => FULL_MAT[ch] || (ch === '=' ? 'thin' : null);
-    const open: Run[] = [];
-    const rects: Run[] = [];
-    for (let r = 0; r < g.length; r++) {
-      const runs: Run[] = [];
-      const cols = g[r].length;
-      for (let c = 0; c < cols; c++) {
-        const key = keyOf(g[r][c]);
-        if (!key) continue;
-        let n = 1;
-        while (c + n < cols && keyOf(g[r][c + n]) === key) n++;
-        runs.push({ c0: c, c1: c + n - 1, r0: r, r1: r, key });
-        c += n - 1;
-      }
-      for (const run of runs) {
-        const prev = run.key !== 'thin' && open.find((o) => o.key === run.key && o.c0 === run.c0 && o.c1 === run.c1 && o.r1 === r - 1);
-        if (prev) prev.r1 = r;
-        else {
-          open.push(run);
-          rects.push(run);
-        }
-      }
+    this.thins = [];
+    for (const q of terrainRects(g)) {
+      const b = this.staticBody(q.x, q.y, q.w, q.h, q.mat);
+      if (q.thin) this.thins.push(b);
     }
-    for (const q of rects) {
-      const x = q.c0 * T;
-      const w = (q.c1 - q.c0 + 1) * T;
-      if (q.key === 'thin') this.staticBody(x, q.r0 * T, w, 7, 'grass');
-      else this.staticBody(x, q.r0 * T, w, (q.r1 - q.r0 + 1) * T, q.key);
-    }
-
-    // Rampas: cada diagonal continua es un solo triángulo
-    const seen = new Set<string>();
-    for (let r = 0; r < g.length; r++) {
-      for (let c = 0; c < g[r].length; c++) {
-        const ch = g[r][c];
-        if ((ch !== '/' && ch !== '\\') || seen.has(`${r},${c}`)) continue;
-        const up = ch === '/';
-        let n = 0;
-        while (g[up ? r - n : r + n]?.[c + n] === ch) {
-          seen.add(`${up ? r - n : r + n},${c + n}`);
-          n++;
-        }
-        const v = up
-          ? [{ x: c * T, y: (r + 1) * T }, { x: (c + n) * T, y: (r + 1 - n) * T }, { x: (c + n) * T, y: (r + 1) * T }]
-          : [{ x: c * T, y: r * T }, { x: (c + n) * T, y: (r + n) * T }, { x: c * T, y: (r + n) * T }];
-        const body: GameBody = this.matter.add.fromVertices((v[0].x + v[1].x + v[2].x) / 3, (v[0].y + v[1].y + v[2].y) / 3, [v], {
-          isStatic: true, friction: MATERIALS.grass.friction, frictionStatic: 0.5, restitution: MATERIALS.grass.restitution, label: 'grass',
-        });
-        body.mat = 'grass';
-      }
+    for (const { verts: v, mat } of terrainRamps(g)) {
+      const M = MATERIALS[mat];
+      const body: GameBody = this.matter.add.fromVertices((v[0].x + v[1].x + v[2].x) / 3, (v[0].y + v[1].y + v[2].y) / 3, [v], {
+        isStatic: true, friction: M.friction, frictionStatic: 0.5, restitution: M.restitution, label: mat,
+      });
+      body.mat = mat;
     }
     this.ground = (this.matter.world.getAllBodies() as GameBody[]).find((b) => b.mat === 'grass' && b.bounds.max.y >= this.worldH - 1) || null;
   }
@@ -676,9 +644,12 @@ export default class GameScene extends Phaser.Scene {
       const y = m.r * T;
       const body = this.staticBody(x, y, w, 9, 'wood');
       const sprite = this.add.image(x, y, renderBlock(this, `mover-${L.theme}-${w}`, w, 9, L.theme, 'grass')).setOrigin(0).setDepth(6);
-      const rail = this.add.graphics().setDepth(4);
-      rail.fillStyle(hex(this.P.outline), 0.35);
-      for (let rx = x - 24; rx <= x + w + 24; rx += 4) rail.fillRect(rx, y + 4, 2, 1);
+      // carril punteado (pre-dibujado: un Graphics se re-triangularía en cada fotograma)
+      const railW = w + 48 + 2;
+      this.add.image(x - 24, y + 4, bakeTexture(this, `rail-${L.theme}-${w}`, railW, 1, (c) => {
+        c.fillStyle = rgba(this.P.outline, 0.35);
+        for (let rx = 0; rx <= w + 48; rx += 4) c.fillRect(rx, 0, 2, 1);
+      })).setOrigin(0).setDepth(4);
       const mv: Mover = { body, sprite, baseX: x, x, y, w, h: 9, range: 24, omega: (Math.PI * 2) / 3.2, phase: Math.random() * 6, t: 0, vx: 0 };
       body.mover = mv;
       return mv;
@@ -713,9 +684,10 @@ export default class GameScene extends Phaser.Scene {
       const y = s.r * T + T / 2;
       const sp = this.add.sprite(x, y, 'saw', 0).setDepth(7).play('saw-spin');
       if (s.range) {
-        const g = this.add.graphics().setDepth(4);
-        g.fillStyle(hex(this.P.outline), 0.4);
-        for (let rx = x - s.range; rx <= x + s.range; rx += 3) g.fillRect(rx, y, 2, 1);
+        this.add.image(x - s.range, y, bakeTexture(this, `sawrail-${L.theme}-${s.range}`, s.range * 2 + 2, 1, (c) => {
+          c.fillStyle = rgba(this.P.outline, 0.4);
+          for (let rx = 0; rx <= s.range * 2; rx += 3) c.fillRect(rx, 0, 2, 1);
+        })).setOrigin(0).setDepth(4);
         sp.x = x - s.range;
         this.tweens.add({ targets: sp, x: x + s.range, duration: 1800, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
       }
@@ -1208,6 +1180,9 @@ export default class GameScene extends Phaser.Scene {
       Body.setPosition(m.body, { x: nx + m.w / 2, y: m.y + m.h / 2 }, true);
     }
 
+    // plataformas finas: solo sólidas si la bola está por encima
+    for (const b of this.thins) b.collisionFilter.mask = thinSolidFor(this.ball.position.y, this.ballR, b.bounds.min.y) ? 0xffffffff : 0;
+
     this.prevVel = this.getVel();
     this.matter.world.step(ms);
 
@@ -1345,7 +1320,7 @@ export default class GameScene extends Phaser.Scene {
       vy += GRAVITY * (this.ballType.gravity ?? 1) * st;
       x += vx * st;
       y += vy * st;
-      if (this.trajectoryHitsTerrain(x, y)) {
+      if (this.trajectoryHitsTerrain(x, y, vy)) {
         impact = true;
         break;
       }
@@ -1374,16 +1349,16 @@ export default class GameScene extends Phaser.Scene {
     g.strokePath();
   }
 
-  /** Comprueba el contacto de la bola con el terreno sólido del mapa. */
-  trajectoryHitsTerrain(x: number, y: number): boolean {
+  /** Comprueba el contacto de la bola con el terreno sólido del mapa (las plataformas finas solo al bajar). */
+  trajectoryHitsTerrain(x: number, y: number, vy: number): boolean {
     const radius = this.ballR * 0.9;
     for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      const px = x + Math.cos(angle) * radius;
-      const py = y + Math.sin(angle) * radius;
+      const px = x + RING[i][0] * radius;
+      const py = y + RING[i][1] * radius;
       const ch = this.cellAt(px, py);
       const lx = ((px % T) + T) % T;
       const ly = ((py % T) + T) % T;
+      if (ch === '=' && vy < 0) continue;
       if (cellSolid(ch, lx, ly)) return true;
     }
     return false;
@@ -1421,8 +1396,12 @@ export default class GameScene extends Phaser.Scene {
     const s = this.ballShadow;
     if (!this.ballSprite.visible || this.state === 'sinking' || this.state === 'done') {
       s.setAlpha(0);
+      this.shadowAt.on = false;
       return;
     }
+    // quieta (y con el mismo estado) no hace falta volver a buscar el suelo
+    if (Math.abs(cx - this.shadowAt.x) < 0.02 && Math.abs(cy - this.shadowAt.y) < 0.02 && this.shadowAt.on) return;
+    this.shadowAt = { x: cx, y: cy, on: true };
     const maxD = 110;
     let gy: number | null = null;
     for (let d = this.ballR - 1; d < maxD; d++) {
@@ -1474,6 +1453,16 @@ export default class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- Bucle
 
+  /**
+   * Bola parada y lista para golpear, sin nada que se mueva (plataformas, bloques frágiles): la física
+   * no tiene nada que calcular, así que no se avanza (ahorra CPU mientras el jugador apunta o piensa).
+   * Se reanuda sola en cuanto se golpea (`shoot` pone `ready` a false).
+   */
+  physicsIdle() {
+    return this.state === 'play' && this.ready && !this.respawning && !this.frozen && !this.bumpVel
+      && this.movers.length === 0 && this.crumbles.length === 0;
+  }
+
   /** Cámara lenta cuando la bola vuela cerca del hoyo (momento "¿entra o no entra?") */
   targetTimeScale() {
     if (this.state !== 'play' || this.respawning || this.grounded || this.relSpeed < 40) return 1;
@@ -1491,9 +1480,12 @@ export default class GameScene extends Phaser.Scene {
     }
     this.timeScale += (this.targetTimeScale() - this.timeScale) * 0.2;
     this.acc += d * this.timeScale;
-    while (this.acc >= STEP) {
-      this.tick(STEP);
-      this.acc -= STEP;
+    if (this.physicsIdle()) this.acc = 0;
+    else {
+      while (this.acc >= STEP) {
+        this.tick(STEP);
+        this.acc -= STEP;
+      }
     }
     for (const m of this.movers) m.sprite.x = m.x;
 
@@ -1528,6 +1520,10 @@ export default class GameScene extends Phaser.Scene {
     const cy = p.y;
     this.updateBallShadow(cx, cy);
     this.updateBallLight(cx, cy, delta);
+    // un Graphics vacío también cuesta (rompe el lote de dibujo): solo se muestran cuando tienen algo que pintar
+    this.aimGfx.setVisible(this.aiming);
+    this.readyRing.setVisible(this.ready && !this.aiming);
+    this.trailG.setVisible(this.trailPts.length > 1);
 
     if (!this.respawning && this.state !== 'done') {
       if (this.relSpeed > 90 && this.state !== 'sinking') this.trailPts.push({ x: cx, y: cy });
@@ -1620,13 +1616,15 @@ export default class GameScene extends Phaser.Scene {
    * (los hoyos anchos no caben enteros en pantalla).
    */
   drawHolePointer(show: boolean) {
-    const g = (this.holePtr ||= this.add.graphics().setDepth(29));
-    g.clear();
-    if (!show || this.aiming) return;
+    const ptr = (this.holePtr ||= this.buildHolePointer());
+    const hide = () => {
+      if (ptr.badge.visible) ptr.badge.setVisible(false), ptr.wedge.setVisible(false);
+    };
+    if (!show || this.aiming) return hide();
     const v = this.cameras.main.worldView;
     const { x: hx } = this.cupPos;
     const hy = this.cupPos.y - 8;
-    if (hx > v.x + 4 && hx < v.right - 4 && hy > v.y + 4 && hy < v.bottom - 4) return;
+    if (hx > v.x + 4 && hx < v.right - 4 && hy > v.y + 4 && hy < v.bottom - 4) return hide();
     const m = 14;
     const px = Phaser.Math.Clamp(hx, v.x + m, v.right - m);
     const py = Phaser.Math.Clamp(hy, v.y + 46, v.bottom - m); // por debajo del HUD
@@ -1634,17 +1632,48 @@ export default class GameScene extends Phaser.Scene {
     const bob = Math.sin(this.time.now / 180) * 1.5;
     const cx = px + Math.cos(a) * bob;
     const cy = py + Math.sin(a) * bob;
-    const ink = hex(this.P.outline);
-    const tip = (r: number, da: number) => ({ x: cx + Math.cos(a + da) * r, y: cy + Math.sin(a + da) * r });
-    const p1 = tip(11, 0);
-    const p2 = tip(7, 2.3);
-    const p3 = tip(7, -2.3);
-    g.fillStyle(ink, 0.8).fillCircle(cx, cy, 7.5);
-    g.fillStyle(ink, 0.8).fillTriangle(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
-    g.fillStyle(0xffffff, 1).fillCircle(cx, cy, 6);
-    // banderita dentro del círculo
-    g.fillStyle(ink, 1).fillRect(cx - 2, cy - 4, 1, 8);
-    g.fillStyle(hex(PAL.red), 1).fillTriangle(cx - 1, cy - 4, cx + 4, cy - 2, cx - 1, cy);
+    ptr.wedge.setPosition(cx, cy).setRotation(a).setVisible(true);
+    ptr.badge.setPosition(cx, cy).setVisible(true);
+  }
+
+  /** Texturas de la flecha del hoyo (se dibujan una vez, a 4× y con filtro suave para que se vean nítidas) */
+  buildHolePointer() {
+    const K = 4;
+    const ink = rgba(this.P.outline, 0.8);
+    const wedge = bakeTexture(this, `holeptr-wedge-${this.L.theme}`, 24, 24, (c, k) => {
+      c.fillStyle = ink;
+      c.beginPath();
+      c.moveTo(23 * k, 12 * k);
+      c.lineTo((12 + 7 * Math.cos(2.3)) * k, (12 + 7 * Math.sin(2.3)) * k);
+      c.lineTo((12 + 7 * Math.cos(-2.3)) * k, (12 + 7 * Math.sin(-2.3)) * k);
+      c.closePath();
+      c.fill();
+    }, { scale: K, linear: true });
+    const badge = bakeTexture(this, `holeptr-badge-${this.L.theme}`, 16, 16, (c, k) => {
+      const o = this.P.outline;
+      c.fillStyle = ink;
+      c.beginPath();
+      c.arc(8 * k, 8 * k, 7.5 * k, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#ffffff';
+      c.beginPath();
+      c.arc(8 * k, 8 * k, 6 * k, 0, Math.PI * 2);
+      c.fill();
+      // banderita dentro del círculo
+      c.fillStyle = o;
+      c.fillRect(6 * k, 4 * k, 1 * k, 8 * k);
+      c.fillStyle = PAL.red;
+      c.beginPath();
+      c.moveTo(7 * k, 4 * k);
+      c.lineTo(12 * k, 6 * k);
+      c.lineTo(7 * k, 8 * k);
+      c.closePath();
+      c.fill();
+    }, { scale: K, linear: true });
+    return {
+      wedge: this.add.image(0, 0, wedge).setScale(1 / K).setDepth(29).setVisible(false),
+      badge: this.add.image(0, 0, badge).setScale(1 / K).setDepth(29.1).setVisible(false),
+    };
   }
 
   safePos(): Vec {
@@ -1683,7 +1712,8 @@ export default class GameScene extends Phaser.Scene {
     this.kbAiming = false;
     this.ready = false;
     haptic(kind === 'saw' ? [40, 30, 60] : 50);
-    this.holePtr?.clear();
+    this.holePtr?.wedge.setVisible(false);
+    this.holePtr?.badge.setVisible(false);
     this.aimGfx.clear();
     this.readyRing.clear();
     this.counter.setVisible(false);

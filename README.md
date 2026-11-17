@@ -65,7 +65,7 @@ zoom entero, así el arte se ve nítido y los textos van a alta resolución.
 
 Al completar un hoyo se ganan dos cosas:
 
-- **Monedas** (para las mejoras): +5 por terminar, +15 por cada estrella nueva, +10 bajo par y +25 por hoyo en uno.
+- **Monedas** (para las mejoras): +3 por terminar, +8 por cada estrella nueva, +5 bajo par y +15 por hoyo en uno.
 - **Fichas** (para el gachapón): +1 cada vez que terminas un hoyo y +1 extra si es con 3 estrellas.
 
 En la **Tienda** hay tres pestañas: **Habilidades** (mejoras con monedas; las compradas se pueden encender
@@ -93,7 +93,7 @@ El juego se organiza en mundos, cada uno con su aspecto, su música y sus hoyos:
 
 | Mundo | Estado | Mecánicas |
 |---|---|---|
-| **Pradera** (campo de golf) | 9 hoyos | rampas, rough, agua, búnker, setas, plataformas móviles, viento |
+| **Pradera** (campo de golf) | 9 hoyos, validados con `npm run maps` | rampas, rough, agua, búnker, setas, plataformas móviles, viento |
 | **Playa** | próximamente | — |
 | **Pantano** | próximamente | — |
 
@@ -126,6 +126,41 @@ Para que llene la pantalla, el mapa debe tener **33 filas o más**.
 Física **Matter.js**: todo el terreno es sólido por todos lados; las casillas se fusionan en
 rectángulos grandes y cada diagonal de rampa en un solo triángulo para que la bola ruede sin engancharse.
 Estrellas: ≤ par → 3, ≤ par+2 → 2, resto → 1.
+
+## Diseñar hoyos (y comprobar que se pueden jugar)
+
+`npm run maps` simula con la física real del juego (el mismo Matter, sin pantalla) todos los golpes posibles
+desde cada sitio donde puede quedar parada la bola, con una cuenta nueva (sin mejoras). Para cada hoyo dice:
+
+- si se puede llegar al hoyo desde la salida y si hay sitios sin salida donde la bola queda atrapada
+- el mínimo de golpes y los de un jugador real (con error de unos 3° y un 5 % de potencia) → **par sugerido**
+- la ruta recomendada, con la fiabilidad y el riesgo de cada golpe (avisa de golpes demasiado precisos o arriesgados)
+
+```bash
+npm run maps                  # todos los hoyos (unos 3 min)
+npm run maps -- meadow-3 5    # solo esos (por id o por número en la lista)
+npm run maps -- 7 --map       # además dibuja la ruta sobre el mapa (S = salida, 2, 3… = desde dónde se golpea)
+```
+
+Hace falta Node ≥ 22.18 en tu máquina (no en Docker). Si cambias la física en `GameScene.tick()/update()`,
+cambia también `tools/mapcheck/sim.ts`. Las formas del terreno se comparten en `src/data/terrainShapes.ts`.
+
+Reglas que siguen los hoyos de la Pradera (alcance con potencia 70–85 %: sube 4–6 filas y avanza 7–12 columnas):
+
+- cada hoyo presenta una mecánica y la convierte en el obstáculo principal
+- saltos de la ruta normal de 4–5 filas de subida; islas de llegada anchas (9+ casillas) y sin otra isla encima
+- las plataformas finas `=` solo son sólidas por arriba: se atraviesan al subir desde abajo
+- el par es el que sugiere la herramienta: golpes del jugador real redondeados
+
+## Rendimiento
+
+- **Tope de fps en pantallas rápidas:** al arrancar se mide el refresco real; con 100 Hz o más el juego se limita a su
+  mitad/tercio exacto (144 Hz → 72 fps, 120 Hz → 60, 240 Hz → 60). En 60 Hz no cambia nada (`capFrameRate` en `src/main.ts`).
+- **Nada de `Graphics` para formas fijas:** Phaser vuelve a triangular y enviar cada `Graphics` a la GPU en cada fotograma,
+  aunque no cambie. Las formas estáticas (carriles, marco de la barra, flecha del hoyo) se pintan una vez con
+  `bakeTexture` (`src/gfx/bake.ts`) y se usan como imágenes. Los `Graphics` dinámicos (apuntado, rastro, anillo) se ocultan cuando están vacíos.
+- **Física en pausa con la bola parada:** si la bola está lista para golpear y no hay plataformas móviles ni bloques frágiles,
+  no se avanza la simulación (`physicsIdle` en `GameScene`).
 
 ## Atajos de desarrollo
 

@@ -4,6 +4,7 @@ import { MECHANICS } from '../data/levels';
 import { progress } from '../systems/progress';
 import { sfx, music } from '../systems/audio';
 import { fitCamera } from '../ui/camera';
+import { bakeTexture, roundRectPath } from '../gfx/bake';
 import { label, makeButton, iconButton, panel, stopEvent } from '../ui/widgets';
 import { openSettings, type SettingsPanel } from '../ui/settings';
 import type GameScene from './GameScene';
@@ -46,7 +47,7 @@ export default class UIScene extends Phaser.Scene {
   barTop = 0;
   barBot = 0;
   barX = 0;
-  barFill!: Phaser.GameObjects.Graphics;
+  barFill!: Phaser.GameObjects.Image;
   barBall!: Phaser.GameObjects.Sprite;
 
   constructor() {
@@ -269,22 +270,31 @@ export default class UIScene extends Phaser.Scene {
     const x = W - 6;
     this.barTop = 70;
     this.barBot = H - 50;
-    const g = this.add.graphics();
-    g.fillStyle(hex('#35282c'), 0.8).fillRoundedRect(x - 3, this.barTop - 2, 6, this.barBot - this.barTop + 4, 3);
-    g.fillStyle(hex('#5a4448'), 1).fillRoundedRect(x - 1.5, this.barTop, 3, this.barBot - this.barTop, 1.5);
+    // marco de la barra: pre-dibujado a 4× (un Graphics se vuelve a triangular en cada fotograma)
+    const len = this.barBot - this.barTop;
+    const K = 4;
+    this.add.image(x - 3, this.barTop - 2, bakeTexture(this, 'hud-bar', 6, len + 4, (c, k) => {
+      c.fillStyle = 'rgba(53,40,44,0.8)';
+      roundRectPath(c, 0, 0, 6 * k, (len + 4) * k, 3 * k);
+      c.fill();
+      c.fillStyle = '#5a4448';
+      roundRectPath(c, 1.5 * k, 2 * k, 3 * k, len * k, 1.5 * k);
+      c.fill();
+    }, { scale: K, linear: true })).setOrigin(0).setScale(1 / K);
     this.add.image(x, this.barTop - 8, 'glow').setTint(0xfff1b0).setBlendMode('ADD').setScale(0.3).setAlpha(0.7);
     this.add.sprite(x - 1, this.barTop - 3, 'flag', 0).setOrigin(1, 1).setFlipX(true).setScale(0.8).play('flag-wave');
-    g.fillStyle(0xffffff).fillRect(x - 0.5, this.barTop - 14, 1, 12);
+    this.add.image(x, this.barTop - 8, 'px').setDisplaySize(1, 12); // palo de la bandera
     this.barX = x;
-    this.barFill = this.add.graphics();
+    // relleno verde: una imagen estirada (en vez de redibujar un Graphics en cada fotograma)
+    this.barFill = this.add.image(x - 1.5, this.barBot, 'px').setOrigin(0, 1).setTint(hex('#b8ec6a')).setVisible(false);
     this.barBall = this.add.sprite(x, this.barBot, `ball-${progress.skin}`, 0);
   }
 
   onProgress(t: number) {
     const y = this.barBot - (this.barBot - this.barTop) * t;
     this.barBall.y = y;
-    this.barFill.clear();
-    if (this.barBot - y > 2) this.barFill.fillStyle(hex('#b8ec6a')).fillRoundedRect(this.barX - 1.5, y, 3, this.barBot - y, 1.5);
+    const h = this.barBot - y;
+    this.barFill.setVisible(h > 2).setDisplaySize(3, Math.max(h, 0.01));
   }
 
   onHud({ strokes }: { strokes: number }) {

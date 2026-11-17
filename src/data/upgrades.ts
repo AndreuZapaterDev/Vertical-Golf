@@ -116,7 +116,7 @@ export const SKINS: Skin[] = [
  *   monedas (mejoras): complete por terminar, star por cada estrella NUEVA, underPar / holeInOne
  *   fichas (gachapón): tokens por terminar + tokens3Stars extra si es con 3 estrellas (cada vez)
  */
-export const ECONOMY = { complete: 5, star: 15, underPar: 10, holeInOne: 25, tokens: 1, tokens3Stars: 1 };
+export const ECONOMY = { complete: 3, star: 8, underPar: 5, holeInOne: 15, tokens: 1, tokens3Stars: 1 };
 
 export function upgradeDef(id: UpgradeId): Upgrade {
   const u = UPGRADES.find((u) => u.id === id);

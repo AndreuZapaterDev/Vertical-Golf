@@ -21,6 +21,32 @@ async function start() {
   const game = new Phaser.Game(gameConfig);
   window.__GAME__ = game; // útil para depurar desde la consola
   mobileFullscreen();
+  capFrameRate(game);
+}
+
+/**
+ * En pantallas de 100 Hz o más el navegador dibuja un fotograma por refresco (144, 165, 240…), y el juego
+ * gastaría 2-4 veces más CPU y batería sin que se note (la física va a paso fijo y el arte es pixel art).
+ * Se mide el refresco real y se limita a su mitad/tercio exacto (144 → 72, 120 → 60, 240 → 60): el ritmo
+ * sale regular. En pantallas de 60 Hz (o menos) no se toca nada.
+ */
+function capFrameRate(game: Phaser.Game) {
+  setTimeout(() => {
+    const t: number[] = [];
+    const tick = (now: number) => {
+      t.push(now);
+      if (t.length < 45) return void requestAnimationFrame(tick);
+      const d = t.slice(1).map((v, i) => v - t[i]).sort((a, b) => a - b);
+      const period = d[Math.floor(d.length / 4)]; // cuartil bajo: ignora los tirones de carga
+      const hz = 1000 / period;
+      if (hz < 100 || hz > 400) return;
+      const n = Math.max(2, Math.round(hz / 60));
+      // un 1 % por encima del refresco/n, para que la tolerancia de los relojes no se coma fotogramas
+      game.loop.setFPSLimit((hz / n) * 1.01);
+      console.info(`[fps] pantalla ~${Math.round(hz)} Hz → límite ${Math.round(hz / n)} fps`);
+    };
+    requestAnimationFrame(tick);
+  }, 2500);
 }
 
 /**

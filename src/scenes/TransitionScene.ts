@@ -40,6 +40,7 @@ export default class TransitionScene extends Phaser.Scene {
     this.t = 0;
     this.cb = cb;
     this.blocker.setInteractive();
+    this.g.setVisible(true);
     this.scene.bringToTop();
   }
 
@@ -80,7 +81,7 @@ export default class TransitionScene extends Phaser.Scene {
       });
     } else if (this.state === 'reveal') {
       this.state = 'idle';
-      g.clear();
+      g.clear().setVisible(false); // sin nada que pintar, no se dibuja
       this.blocker.disableInteractive();
     }
   }
