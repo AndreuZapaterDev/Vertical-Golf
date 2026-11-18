@@ -1189,6 +1189,7 @@ export default class GameScene extends Phaser.Scene {
       this.resumeFollow();
       this.kbAiming = false;
       this.aiming = true;
+      this.wheelZoom = 1; // al empezar a cargar el golpe, el zoom de la rueda vuelve al normal
       this.chargeStep = 0;
       this.aimStart.set(p.x / Z, p.y / Z);
       this.aimVec.set(0, 0);
@@ -1235,9 +1236,9 @@ export default class GameScene extends Phaser.Scene {
 
     this.input.on('pointerdown', this.onDown);
     this.input.on('pointermove', this.onMove);
-    // rueda del ratón: zoom in / zoom out para mirar el mapa antes de golpear (al disparar vuelve al zoom normal)
+    // rueda del ratón: zoom in / zoom out para mirar el mapa antes de golpear (al empezar a cargar el golpe vuelve al zoom normal)
     this.onWheel = (_p, _over, _dx, dy) => {
-      if (this.state !== 'play') return;
+      if (this.state !== 'play' || this.aiming) return; // mientras se carga el golpe, el zoom no se toca
       const before = this.wheelZoom;
       this.wheelZoom = Phaser.Math.Clamp(this.wheelZoom * Math.exp(-dy * 0.0015), WHEEL_ZOOM_MIN, WHEEL_ZOOM_MAX);
       const now = this.time.now;
@@ -1302,6 +1303,7 @@ export default class GameScene extends Phaser.Scene {
     this.resumeFollow();
     this.aiming = true;
     this.kbAiming = true;
+    this.wheelZoom = 1; // igual que con el ratón: al empezar a apuntar vuelve el zoom normal
     this.chargeStep = 0;
     this.applyKeyboardAim();
   }
