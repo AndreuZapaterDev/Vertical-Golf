@@ -145,7 +145,7 @@ export default class MenuScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-ENTER', () => {
       if (!this.settingsPanel && !this.resetPanel) this.go('Game', { levelIndex: next });
     });
-    music.play(theme);
+    music.play('menu');
     music.setPaused(false);
 
     label(this, W / 2, H - 9, isSupabaseEnabled ? '● online' : '○ offline', 8, { color: '#f0dcc0', strokeThickness: 2 }).setDepth(20);

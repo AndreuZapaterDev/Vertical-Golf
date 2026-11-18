@@ -211,6 +211,8 @@ export default class GameScene extends Phaser.Scene {
   simTime = 0;
   acc = 0;
   groundTime = -1000;
+  /** última vez que la bola tocó una pared o un techo (no un suelo) */
+  wallTime = -1000;
   groundBody: GameBody | null = null;
   groundNormal: Vec = { x: 0, y: 1 };
   grounded = false;
@@ -343,6 +345,7 @@ export default class GameScene extends Phaser.Scene {
     this.simTime = 0;
     this.acc = 0;
     this.groundTime = -1000;
+    this.wallTime = -1000;
     this.groundBody = null;
     this.groundNormal = { x: 0, y: 1 };
     this.grounded = false;
@@ -1400,6 +1403,8 @@ export default class GameScene extends Phaser.Scene {
         this.groundTime = this.simTime;
         this.groundBody = other;
         this.groundNormal = { x: nx, y: ny };
+      } else {
+        this.wallTime = this.simTime;
       }
       if (start && !this.frozen) {
         const impact = this.prevVel.x * nx + this.prevVel.y * ny;
@@ -1551,7 +1556,9 @@ export default class GameScene extends Phaser.Scene {
     this.grounded = this.simTime - this.groundTime < 30;
     // En el aire la bola no conserva giro: si llegara girando al suelo en sentido contrario, la fricción de Matter la empujaría hacia atrás
     // al aterrizar. En el suelo el giro se deja (así rueda con naturalidad).
-    if (!this.grounded) Body.setAngularVelocity(this.ball, 0);
+    // Contra una pared tampoco se anula: una bola que no puede girar se frota contra la pared y la fricción de Matter la deja colgada.
+    const touchingWall = this.simTime - this.wallTime < 30;
+    if (!this.grounded && !touchingWall) Body.setAngularVelocity(this.ball, 0);
     const v = this.getVel();
     const carrierVx = this.carrierVelocity();
     this.relSpeed = Math.hypot(v.x - carrierVx, v.y);
