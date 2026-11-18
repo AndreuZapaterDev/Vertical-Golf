@@ -8,7 +8,7 @@
 import { createRequire } from 'node:module';
 import { TILE as T, GRAVITY, MAX_SPEED, BALL_R, STEP, MATERIALS, type MaterialKey } from '../../src/constants';
 import { terrainRects, terrainRamps, thinSolidFor } from '../../src/data/terrainShapes';
-import type { ParsedLevel } from '../../src/data/levels';
+import { windAt, type ParsedLevel } from '../../src/data/levels';
 
 const require = createRequire(import.meta.url);
 // Phaser no exporta sus fuentes en "exports": se cargan por ruta (es el mismo Matter que usa el juego)
@@ -217,6 +217,8 @@ export class LevelSim {
     Engine.update(this.engine, ms);
 
     this.grounded = this.simTime - this.groundTime < 30;
+    // igual que en GameScene: en el aire la bola no conserva giro (evita empujes hacia atrás al aterrizar)
+    if (!this.grounded) Body.setAngularVelocity(this.ball, 0);
     const v = this.getVel();
     const carrierVx = this.carrierVelocity();
     this.relSpeed = Math.hypot(v.x - carrierVx, v.y);
@@ -247,7 +249,7 @@ export class LevelSim {
         cr.at = this.simTime + 1100;
       }
     } else {
-      vx += this.L.wind * dt;
+      vx += windAt(this.L, this.ball.position.y) * dt;
     }
     this.setVel(vx, vy);
 

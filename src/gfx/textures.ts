@@ -559,6 +559,7 @@ const ICONS: Record<string, string[]> = {
   mute: ['....x....', '...xx....', 'xxxxx.x.x', 'xxxxx..x.', 'xxxxx.x.x', 'xxxxx....', '...xx....', '....x....', '.........'],
   back: ['...x.....', '..xx.....', '.xxxxxxxx', 'xxxxxxxxx', '.xxxxxxxx', '..xx.....', '...x.....', '.........', '.........'],
   pause: ['.........', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.xx...xx.', '.........'],
+  eye: ['.........', '...xxx...', '.xx...xx.', 'x..xxx..x', 'x.xxxxx.x', 'x..xxx..x', '.xx...xx.', '...xxx...', '.........'],
   gear: ['...x.x...', '.x.xxx.x.', '..xxxxx..', 'xxxx.xxxx', '.xx...xx.', 'xxxx.xxxx', '..xxxxx..', '.x.xxx.x.', '...x.x...'],
 };
 

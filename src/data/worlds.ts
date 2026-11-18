@@ -1,4 +1,5 @@
 import { MEADOW } from './worlds/meadow';
+import { BEACH } from './worlds/beach';
 import type { ThemeKey } from '../constants';
 import type { LevelDef } from './levels';
 
@@ -40,8 +41,7 @@ export const WORLDS: WorldDef[] = [
     theme: 'beach',
     button: 'gold',
     preview: ['.................', '......../#\\......', 'WWWWW##########WW', '#################'],
-    levels: [],
-    comingSoon: true,
+    levels: BEACH,
   },
   {
     id: 'swamp',

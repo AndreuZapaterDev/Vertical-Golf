@@ -1,4 +1,4 @@
-import { COLS, type ThemeKey } from '../constants';
+import { COLS, TILE, type ThemeKey } from '../constants';
 import { WORLDS } from './worlds';
 
 /**
@@ -7,6 +7,7 @@ import { WORLDS } from './worlds';
  *
  *   .  vacío            #  tierra con hierba     /  rampa que sube a la derecha
  *   \  rampa que sube a la izquierda              =  plataforma fina
+ *   {  rampa de arena que sube a la derecha       }  rampa de arena que sube a la izquierda
  *   r  rough (hierba alta: frena y resta potencia)
  *   s  arena (búnker)   i  hielo                 W  agua (penalización)
  *   M  seta saltarina   P  plataforma móvil      C  bloque frágil
@@ -28,6 +29,15 @@ export interface LevelDef {
   intro?: MechanicKey;
   /** px/s² de empuje horizontal mientras la bola vuela (+ derecha) */
   wind?: number;
+  /** vientos distintos según la altura: bandas entre dos alturas (en filas sobre la salida) con su propio viento. Fuera de ellas rige `wind` */
+  windZones?: WindZone[];
+}
+
+/** Banda de viento: de la altura `from` a la `to` (filas por encima de la salida) sopla `wind` px/s² (+ derecha, − izquierda) */
+export interface WindZone {
+  from: number;
+  to: number;
+  wind: number;
 }
 
 /** Un hoyo con los datos de su mundo y su posición */
@@ -70,6 +80,8 @@ export interface ParsedLevel extends LevelMeta {
   movers: Span[];
   crumbles: Span[];
   wind: number;
+  /** bandas de viento ya en píxeles (y0 arriba, y1 abajo) */
+  windBands: { y0: number; y1: number; wind: number }[];
 }
 
 /**
@@ -183,5 +195,13 @@ export function parseLevel(index: number): ParsedLevel {
   }
 
   const groundRow = open ? s.r + 1 : grid.length - GROUND_ROWS;
-  return { ...meta, index, open, grid, cols, rows: grid.length, groundRow, start: s, hole: h, ...objects, wind: meta.wind || 0 };
+  const floorY = (s.r + 1) * TILE;
+  const windBands = (meta.windZones ?? []).map((z) => ({ y0: floorY - z.to * TILE, y1: floorY - z.from * TILE, wind: z.wind }));
+  return { ...meta, index, open, grid, cols, rows: grid.length, groundRow, start: s, hole: h, ...objects, wind: meta.wind || 0, windBands };
+}
+
+/** Viento (px/s²) que sopla a la altura `y` (píxeles del mundo) */
+export function windAt(L: Pick<ParsedLevel, 'wind' | 'windBands'>, y: number): number {
+  for (const b of L.windBands) if (y >= b.y0 && y < b.y1) return b.wind;
+  return L.wind;
 }

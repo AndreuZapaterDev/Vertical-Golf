@@ -23,7 +23,7 @@ function hash(x: number, y: number, s = 0) {
 }
 
 // 1 hierba · 2 arena · 3 hielo · 4 rough (hierba alta) · 5 green (alrededor del hoyo)
-const MAT_OF: Record<string, number> = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, i: 3, r: 4, G: 5 };
+const MAT_OF: Record<string, number> = { '#': 1, '/': 1, '\\': 1, '=': 1, s: 2, '{': 2, '}': 2, i: 3, r: 4, G: 5 };
 
 /** ¿El píxel (lx,ly) de una casilla con este carácter es sólido? */
 export function cellSolid(ch: string | undefined, lx: number, ly: number): boolean {
@@ -35,8 +35,10 @@ export function cellSolid(ch: string | undefined, lx: number, ly: number): boole
     case 'G':
       return true;
     case '/':
+    case '{':
       return ly + 0.5 >= T - (lx + 0.5);
     case '\\':
+    case '}':
       return ly + 0.5 >= lx + 0.5;
     case '=':
       return ly < 7;
@@ -348,7 +350,7 @@ export function renderTerrain(scene: Phaser.Scene, key: string, grid: string[][]
     (x, y) => cell(x, y) === 'W',
     (x, y) => {
       const ch = cell(x, y);
-      return ch !== '/' && ch !== '\\';
+      return ch !== '/' && ch !== '\\' && ch !== '{' && ch !== '}';
     },
     open ? { left: 0, right: 0, top: 0, bottom: 0 } : undefined,
   );

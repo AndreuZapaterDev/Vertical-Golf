@@ -38,6 +38,10 @@ export default class UIScene extends Phaser.Scene {
   onHidden!: () => void;
 
   strokesText!: Phaser.GameObjects.Text;
+  windGauge!: Phaser.GameObjects.Container;
+  windTxt!: Phaser.GameObjects.Text;
+  windChev: Phaser.GameObjects.Text[] = [];
+  windParticles: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
   sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   shieldIcon?: Phaser.GameObjects.Image;
   shieldText?: Phaser.GameObjects.Text;
@@ -75,7 +79,6 @@ export default class UIScene extends Phaser.Scene {
 
     this.add.image(W / 2, H / 2, 'vignette').setDisplaySize(W, H).setAlpha(0.55);
     this.ambientFx(I.theme);
-    if (I.wind) this.windFx(I.wind);
 
     // HUD superior
     panel(this, 30, 15, 54, 24, 'hud9');
@@ -90,12 +93,10 @@ export default class UIScene extends Phaser.Scene {
     iconButton(this, W - 33, 15, 'restart', () => this.gs.restartLevel());
 
 
-    if (I.wind) {
-      const n = Math.abs(I.wind) >= 45 ? 3 : 2;
-      const arrows = (I.wind > 0 ? '›' : '‹').repeat(n);
-      const w = label(this, W / 2, 38, I.wind > 0 ? `VIENTO ${arrows}` : `${arrows} VIENTO`, 9, { color: PAL.cyan });
-      this.tweens.add({ targets: w, x: W / 2 + Math.sign(I.wind) * 3, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    }
+    // indicador de viento: cambia si el hoyo tiene bandas de viento distintas según la altura
+    this.buildWindGauge();
+    this.setWind(I.wind);
+    this.bus.on('wind', (w: number) => this.setWind(w, true), this);
 
     this.buildProgressBar();
     this.buildAbilities(I);
@@ -256,12 +257,58 @@ export default class UIScene extends Phaser.Scene {
     });
   }
 
+  /** Medidor de viento bajo el contador de golpes: "VIENTO" y flechas animadas que avanzan en la dirección del viento (más flechas = más fuerte) */
+  buildWindGauge() {
+    this.windGauge = this.add.container(W / 2, 45).setVisible(false);
+    this.windTxt = label(this, 0, 0, 'VIENTO', 6, { color: PAL.cyan, strokeThickness: 1 });
+    this.windChev = [0, 1, 2].map(() => label(this, 0, 0, '›', 11, { color: PAL.cyan, strokeThickness: 1 }));
+    this.windGauge.add([panel(this, 0, 0, 62, 15, 'hud9'), this.windTxt, ...this.windChev]);
+  }
+
+  /** Muestra (o actualiza) el viento: medidor con flechas y rayas suaves que cruzan la pantalla. Con 0 se oculta todo. */
+  setWind(wind: number, changed = false) {
+    for (const p of this.windParticles) p.destroy();
+    this.windParticles = [];
+    for (const c of this.windChev) this.tweens.killTweensOf(c);
+    this.tweens.killTweensOf(this.windGauge);
+    if (!wind) {
+      this.windGauge.setVisible(false);
+      return;
+    }
+    const dir = Math.sign(wind);
+    const n = Math.abs(wind) >= 45 ? 3 : Math.abs(wind) >= 25 ? 2 : 1;
+    this.windTxt.setX(-dir * 12);
+    this.windChev.forEach((c, i) => {
+      c.setText(dir > 0 ? '›' : '‹').setX(dir * (12 + i * 7));
+      if (i < n) {
+        c.setAlpha(0.3);
+        this.tweens.add({ targets: c, alpha: 1, duration: 340, yoyo: true, repeat: -1, delay: i * 130, ease: 'Sine.easeInOut' });
+      } else c.setAlpha(0.12);
+    });
+    this.windGauge.setVisible(true).setScale(1);
+    // al cambiar de viento en pleno hoyo, el medidor da un pequeño salto para que se note
+    if (changed) this.tweens.add({ targets: this.windGauge, scale: { from: 1.25, to: 1 }, duration: 380, ease: 'Back.easeOut' });
+    this.windFx(wind);
+  }
+
+  /** Rayas finas y hojas que cruzan la pantalla con el viento: casi transparentes y por detrás del HUD, para que se noten sin molestar */
   windFx(wind: number) {
     const dir = Math.sign(wind);
-    const sp = Math.abs(wind) * 3;
-    const common = { x: dir > 0 ? -16 : W + 16, y: { min: 40, max: H }, speedX: dir > 0 ? { min: sp, max: sp * 1.6 } : { min: -sp * 1.6, max: -sp } };
-    this.add.particles(0, 0, 'streak', { ...common, lifespan: 2600, alpha: { start: 0.35, end: 0 }, frequency: 120 });
-    this.add.particles(0, 0, 'leaf', { ...common, lifespan: 3000, speedY: { min: -10, max: 15 }, rotate: { start: 0, end: 360 * dir }, frequency: 450 });
+    const a = Math.abs(wind);
+    const k = Math.min(1, a / 45); // 0 = brisa, 1 = racha fuerte
+    const sp = 40 + a * 3.5;
+    const common = {
+      x: dir > 0 ? -24 : W + 24,
+      y: { min: 50, max: H - 10 },
+      speedX: dir > 0 ? { min: sp, max: sp * 1.5 } : { min: -sp * 1.5, max: -sp },
+    };
+    const streaks = this.add
+      .particles(0, 0, 'streak', { ...common, lifespan: 3400, scaleX: { min: 1.5 + 2 * k, max: 3 + 5 * k }, alpha: { start: 0.13 + 0.12 * k, end: 0 }, frequency: 260 - 150 * k })
+      .setDepth(-5);
+    const leaves = this.add
+      .particles(0, 0, 'leaf', { ...common, lifespan: 3200, speedY: { min: -8, max: 14 }, rotate: { start: 0, end: 360 * dir }, alpha: { start: 0.6, end: 0 }, frequency: 1100 - 600 * k })
+      .setDepth(-5);
+    this.windParticles.push(streaks, leaves);
   }
 
   // ---------------------------------------------------------------- HUD

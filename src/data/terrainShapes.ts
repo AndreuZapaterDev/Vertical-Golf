@@ -70,6 +70,9 @@ export function terrainRects(g: string[][]): RectShape[] {
   });
 }
 
+/** Material de cada rampa: '/' y '\' de hierba, '{' (sube a la derecha) y '}' (sube a la izquierda) de arena */
+const RAMP_MAT: Record<string, MaterialKey> = { '/': 'grass', '\\': 'grass', '{': 'sand', '}': 'sand' };
+
 /** Rampas: cada diagonal continua es un solo triángulo */
 export function terrainRamps(g: string[][]): RampShape[] {
   const out: RampShape[] = [];
@@ -77,8 +80,8 @@ export function terrainRamps(g: string[][]): RampShape[] {
   for (let r = 0; r < g.length; r++) {
     for (let c = 0; c < g[r].length; c++) {
       const ch = g[r][c];
-      if ((ch !== '/' && ch !== '\\') || seen.has(`${r},${c}`)) continue;
-      const up = ch === '/';
+      if (!RAMP_MAT[ch] || seen.has(`${r},${c}`)) continue;
+      const up = ch === '/' || ch === '{';
       let n = 0;
       while (g[up ? r - n : r + n]?.[c + n] === ch) {
         seen.add(`${up ? r - n : r + n},${c + n}`);
@@ -87,7 +90,7 @@ export function terrainRamps(g: string[][]): RampShape[] {
       const verts = up
         ? [{ x: c * T, y: (r + 1) * T }, { x: (c + n) * T, y: (r + 1 - n) * T }, { x: (c + n) * T, y: (r + 1) * T }]
         : [{ x: c * T, y: r * T }, { x: (c + n) * T, y: (r + n) * T }, { x: c * T, y: (r + n) * T }];
-      out.push({ verts, mat: 'grass' });
+      out.push({ verts, mat: RAMP_MAT[ch] });
     }
   }
   return out;

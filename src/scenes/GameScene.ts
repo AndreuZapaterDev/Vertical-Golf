@@ -4,7 +4,7 @@ import {
   W, H, VIEW, TILE, GRAVITY, MAX_SPEED, MAX_DRAG, FOLLOW_OFFSET, BALL_R, STEP, MATERIALS, THEMES, PAL, hex, FONT, FONT_SCALE,
   type MaterialKey, type Theme, type ThemeKey,
 } from '../constants';
-import { LEVELS, parseLevel, type ParsedLevel, type MechanicKey } from '../data/levels';
+import { LEVELS, parseLevel, windAt, type ParsedLevel, type MechanicKey } from '../data/levels';
 import { renderTerrain, renderBlock, cellSolid } from '../gfx/terrain';
 import { terrainRects, terrainRamps, thinSolidFor } from '../data/terrainShapes';
 import { tintFill } from '../gfx/tint';
@@ -152,6 +152,9 @@ const powerColor = (p: number) => POWER_COLORS[Math.min(3, Math.floor(p * 4))];
 /** 12 puntos del contorno de la bola (para comprobar choques en la trayectoria sin recalcular senos y cosenos) */
 const RING = Array.from({ length: 12 }, (_, i) => [Math.cos((i / 12) * Math.PI * 2), Math.sin((i / 12) * Math.PI * 2)]);
 const SHOT_POWER_EXPONENT = 1.25;
+/** Cuánto se aleja la cámara con la máxima potencia (1/3 → zoom ×0,67, es decir, se ve 1,5 veces más mapa). Con 0 se desactiva */
+const AIM_ZOOM_OUT = 1 / 3;
+
 const shotPower = (dragLength: number) => Math.pow(Phaser.Math.Clamp(dragLength / MAX_DRAG, 0, 1), SHOT_POWER_EXPONENT);
 
 /**
@@ -224,6 +227,13 @@ export default class GameScene extends Phaser.Scene {
   /** brillos que se deslizan por la superficie del agua */
   waterFx: Phaser.GameObjects.TileSprite[] = [];
   bgTile!: Phaser.GameObjects.TileSprite;
+  vignette!: Phaser.GameObjects.Image;
+  /** viento que sopla ahora mismo a la altura de la bola (cambia al cruzar una banda de viento) */
+  curWind = 0;
+  /** zoom relativo (1 = normal; menos = más lejos) que se ajusta con la potencia del golpe al apuntar */
+  zoomK = 1;
+  /** zoom que se mantiene mientras la bola vuela tras un golpe fuerte */
+  zoomHold = 1;
   camOff: Vec = { x: 0, y: FOLLOW_OFFSET };
   sky: SkyObject[] = [];
   clouds: Cloud[] = [];
@@ -357,6 +367,9 @@ export default class GameScene extends Phaser.Scene {
     }
     const cam = this.cameras.main;
     cam.setZoom(VIEW.Z);
+    this.zoomK = 1;
+    this.zoomHold = 1;
+    this.curWind = windAt(L, this.L.start.r * T + T);
     // En los hoyos abiertos la cámara deja ver un poco de vacío alrededor (se nota que son islas)
     const side = L.open ? 3 * T : 0;
     const bw = Math.max(this.worldW + side * 2, W);
@@ -390,7 +403,7 @@ export default class GameScene extends Phaser.Scene {
       .setDepth(-9.95)
       .setAlpha(0.3);
     // viñeta suave: oscurece las esquinas y centra la mirada en la acción
-    this.add
+    this.vignette = this.add
       .image((W * (z - 1)) / 2, (H * (z - 1)) / 2, bakeTexture(this, 'vignette', 64, 112, (c) => {
         const gr = c.createRadialGradient(32, 56, 14, 32, 56, 78);
         gr.addColorStop(0, 'rgba(10,18,40,0)');
@@ -480,7 +493,7 @@ export default class GameScene extends Phaser.Scene {
     // colinas: al empezar, su base queda escondida tras el suelo.
     // Son tiras que se repiten en horizontal y acompañan a la cámara (los hoyos pueden ser más anchos que la pantalla).
     for (const [layer, y, f] of [[0, H - 18, 0.35], [1, H + 6, 0.55]]) {
-      const hills = this.add.tileSprite(0, 0, W + 8, 500, `hills-${th}-${layer}`).setOrigin(0, 80 / 500).setDepth(-9.6 + layer * 0.2);
+      const hills = this.add.tileSprite(0, 0, W * 2 + 8, 500, `hills-${th}-${layer}`).setOrigin(0, 80 / 500).setDepth(-9.6 + layer * 0.2);
       add(hills, y, f).tile = true;
     }
 
@@ -659,6 +672,23 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Aplica el zoom relativo y reajusta las capas fijas a la pantalla (fondo, degradado y viñeta) para que sigan cubriendo la vista */
+  applyZoom() {
+    const cam = this.cameras.main;
+    const z = VIEW.Z * this.zoomK;
+    if (Math.abs(cam.zoom - z) < 0.0005) return;
+    cam.setZoom(z);
+    // la vista mide W·Z/z de ancho; centrada en la pantalla, empieza en (W·Z/2)·(1 − 1/z)
+    const k = VIEW.Z / z;
+    const w = W * k;
+    const h = H * k;
+    const x0 = (W * VIEW.Z * (1 - 1 / z)) / 2 * 1;
+    const y0 = (H * VIEW.Z * (1 - 1 / z)) / 2 * 1;
+    this.bgTile.setPosition(x0, y0).setSize(w, h);
+    this.skyGrad.setPosition(x0, y0).setDisplaySize(w, h);
+    this.vignette.setPosition(x0, y0).setDisplaySize(w, h);
+  }
+
   updateSky() {
     const { x: vx, y: vy } = this.cameras.main.worldView;
     const span = Math.max(1, this.worldH - H);
@@ -673,7 +703,7 @@ export default class GameScene extends Phaser.Scene {
       }
       o.y = o.baseY + vy * (1 - o.f);
       if (o.tile && o instanceof Phaser.GameObjects.TileSprite) {
-        o.x = vx - 4;
+        o.x = vx - W / 2 - 4;
         o.tilePositionX = vx * o.f;
       } else o.x = o.baseX + vx * (1 - o.f);
     }
@@ -1359,6 +1389,9 @@ export default class GameScene extends Phaser.Scene {
     this.matter.world.step(ms);
 
     this.grounded = this.simTime - this.groundTime < 30;
+    // En el aire la bola no conserva giro: si llegara girando al suelo en sentido contrario, la fricción de Matter la empujaría hacia atrás
+    // al aterrizar. En el suelo el giro se deja (así rueda con naturalidad).
+    if (!this.grounded) Body.setAngularVelocity(this.ball, 0);
     const v = this.getVel();
     const carrierVx = this.carrierVelocity();
     this.relSpeed = Math.hypot(v.x - carrierVx, v.y);
@@ -1387,7 +1420,7 @@ export default class GameScene extends Phaser.Scene {
       }
       if (gb.crumble && gb.crumble.state === 'idle') this.startCrumble(gb.crumble);
     } else {
-      vx += this.L.wind * (this.ballType.wind ?? 1) * dt;
+      vx += windAt(this.L, this.ball.position.y) * (this.ballType.wind ?? 1) * dt;
       // gravedad propia del tipo (Matter ya aplica la normal: se suma solo la diferencia)
       vy += GRAVITY * ((this.ballType.gravity ?? 1) - 1) * dt;
     }
@@ -1488,7 +1521,7 @@ export default class GameScene extends Phaser.Scene {
     const n = Math.ceil(this.stats.aim / st); // la mejora "Visor" alarga la trayectoria visible
     let impact = false;
     for (let i = 1; i <= n; i++) {
-      vx += this.L.wind * (this.ballType.wind ?? 1) * st;
+      vx += windAt(this.L, y) * (this.ballType.wind ?? 1) * st;
       vy += GRAVITY * (this.ballType.gravity ?? 1) * st;
       x += vx * st;
       y += vy * st;
@@ -1681,6 +1714,25 @@ export default class GameScene extends Phaser.Scene {
       this.camOff.x += (tx - this.camOff.x) * 0.06;
       this.camOff.y += (ty - this.camOff.y) * 0.06;
       this.cameras.main.setFollowOffset(this.camOff.x, this.camOff.y);
+
+      // el viento puede cambiar con la altura: se avisa al HUD cuando la bola cruza a otra banda
+      const w = windAt(this.L, this.ball.position.y);
+      if (w !== this.curWind) {
+        this.curWind = w;
+        this.bus.emit('wind', w);
+      }
+
+      // zoom out según la potencia: cuanto más fuerte el golpe, más mapa se ve (se mantiene mientras la bola vuela)
+      let zt = 1;
+      if (this.aiming && this.aimVec.length() > 6) {
+        zt = 1 - AIM_ZOOM_OUT * shotPower(this.aimVec.length());
+        this.zoomHold = zt;
+      } else if (this.ready) this.zoomHold = 1;
+      else zt = this.zoomHold;
+      const rate = zt < this.zoomK ? 0.12 : 0.05; // se aleja rápido y vuelve despacio
+      this.zoomK += (zt - this.zoomK) * Math.min(1, rate * (delta / 16.7));
+      if (Math.abs(this.zoomK - 1) < 0.002 && zt === 1) this.zoomK = 1;
+      this.applyZoom();
     }
 
     for (const c of this.clouds) {
@@ -2040,7 +2092,7 @@ export default class GameScene extends Phaser.Scene {
       name: L.name,
       theme: L.theme,
       par: L.par,
-      wind: L.wind,
+      wind: windAt(L, this.ball.position.y),
       heightM: Math.round(((this.L.groundRow - this.L.hole.r) * T) / 4),
       intro: L.intro,
       tutorial: L.tutorial,
