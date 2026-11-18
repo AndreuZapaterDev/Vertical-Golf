@@ -1,6 +1,9 @@
 // Resolución lógica del arte (1 unidad = 1 píxel de arte).
 // El canvas real es W*Z × H*Z y las cámaras hacen zoom Z: el pixel art se ve nítido
 // y los textos van a alta resolución.
+/** Versión del juego (se muestra en la pantalla inicial) */
+export const GAME_VERSION = '1.08';
+
 export const W = 240;
 export const H = 426;
 export const VIEW = { Z: 3 };
@@ -11,6 +14,8 @@ export const COLS = W / TILE;
 export const GRAVITY = 500; // px/s² (Matter gravity y = 0.5)
 export const MAX_SPEED = 420; // px/s a potencia máxima (~145 px ≈ 12 casillas de altura; los hoyos se diseñan para saltos de 6–7 filas con ~80 % de potencia)
 export const MAX_DRAG = 64; // px lógicos de arrastre para potencia máxima
+/** Curva de la potencia del golpe: potencia = (arrastre / MAX_DRAG) ^ SHOT_POWER_EXPONENT */
+export const SHOT_POWER_EXPONENT = 1.25;
 export const FOLLOW_OFFSET = 40;
 export const BALL_R = 5;
 export const STEP = 1000 / 120; // paso fijo de física (ms)

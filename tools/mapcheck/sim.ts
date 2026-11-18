@@ -69,6 +69,7 @@ export class LevelSim {
   // estado del golpe en curso (igual que en GameScene)
   simTime = 0;
   groundTime = -1000;
+  wallTime = -1000;
   groundBody: MBody | null = null;
   groundNormal = { x: 0, y: 1 };
   grounded = false;
@@ -179,7 +180,7 @@ export class LevelSim {
           this.groundTime = this.simTime;
           this.groundBody = other;
           this.groundNormal = { x: nx, y: ny };
-        }
+        } else this.wallTime = this.simTime;
       }
     };
     Events.on(this.engine, 'collisionStart', (e: MBody) => onCollide(e, true));
@@ -229,7 +230,8 @@ export class LevelSim {
 
     this.grounded = this.simTime - this.groundTime < 30;
     // igual que en GameScene: en el aire la bola no conserva giro (evita empujes hacia atrás al aterrizar)
-    if (!this.grounded) Body.setAngularVelocity(this.ball, 0);
+    // (contra una pared tampoco: una bola que no puede girar se frota con ella y la fricción de Matter la deja colgada)
+    if (!this.grounded && this.simTime - this.wallTime >= 30) Body.setAngularVelocity(this.ball, 0);
     const v = this.getVel();
     const carrierVx = this.carrierVelocity();
     this.relSpeed = Math.hypot(v.x - carrierVx, v.y);
@@ -320,6 +322,7 @@ export class LevelSim {
     const sp = speed * MAX_SPEED * this.stats.power * MATERIALS[from.mat].power;
     this.simTime = 0;
     this.groundTime = -1000;
+    this.wallTime = -1000;
     this.grounded = false;
     this.groundBody = null;
     this.bumpVel = null;

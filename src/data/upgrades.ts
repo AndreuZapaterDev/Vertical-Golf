@@ -1,11 +1,18 @@
 import type { Rarity } from './cosmetics';
+import { CRUMBLE_DELAY } from './terrainShapes';
 
-export type UpgradeId = 'power' | 'aim' | 'grip' | 'magnet' | 'brake' | 'shield';
+export type UpgradeId = 'power' | 'aim' | 'grip' | 'magnet' | 'wind' | 'boots' | 'sink' | 'lantern' | 'crumble' | 'brake' | 'shield' | 'mulligan';
+
+/** Categoría con la que se agrupan en la tienda */
+export type UpgradeGroup = 'shot' | 'terrain' | 'help';
 
 export interface Upgrade {
   id: UpgradeId;
   name: string;
   desc: string;
+  /** dónde se nota más (sale en la tarjeta de la tienda) */
+  where: string;
+  group: UpgradeGroup;
   icon: string;
   costs: number[];
   values: number[];
@@ -24,41 +31,89 @@ export interface Skin {
   pattern?: 'stripes' | 'dots' | 'gradient' | 'shimmer' | 'prism';
 }
 
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+
 /**
  * Mejoras de la cuenta (se compran con monedas).
  * values[n] = efecto con n niveles comprados; costs[n] = precio del nivel n+1.
+ *
+ * Las de "terreno" salen de lo que usan los mapas: viento (los tres mundos), arena y barro (Playa, Pradera y Pantano),
+ * arenas movedizas y niebla (Pantano) y bloques frágiles (muelles, nenúfares). Todas son opcionales: los mapas se
+ * validan con una cuenta sin mejoras (tools/check-maps.ts).
  */
 export const UPGRADES: Upgrade[] = [
+  // --- Golpe
   {
-    id: 'power', name: 'Potencia', desc: 'Golpes más fuertes', icon: 'up-power',
+    id: 'power', name: 'Potencia', desc: 'Golpes más fuertes', where: 'Saltos altos y largos', group: 'shot', icon: 'up-power',
     costs: [50, 100, 200], values: [1, 1.08, 1.16, 1.25],
     fmt: (v) => (v === 1 ? 'Normal' : `+${Math.round((v - 1) * 100)}%`),
   },
   {
-    id: 'aim', name: 'Visor', desc: 'Ves más trayectoria al apuntar', icon: 'up-aim',
-    costs: [50, 100, 200], values: [0.3, 0.5, 0.75, 1.1],
-    fmt: (v) => ({ 0.3: 'Corto', 0.5: 'Medio', 0.75: 'Largo', 1.1: 'Completo' } as Record<number, string>)[v] ?? String(v),
+    id: 'aim', name: 'Visor', desc: 'Ves más trayectoria al apuntar', where: 'Todos los hoyos', group: 'shot', icon: 'up-aim',
+    costs: [50, 100, 200], values: [0.3, 0.38, 0.46, 0.56],
+    fmt: (v) => ({ 0.3: 'Corto', 0.38: 'Medio', 0.46: 'Largo', 0.56: 'Muy largo' } as Record<number, string>)[v] ?? String(v),
   },
   {
-    id: 'grip', name: 'Agarre', desc: 'La bola frena antes al aterrizar', icon: 'up-grip',
+    id: 'grip', name: 'Agarre', desc: 'La bola frena antes al aterrizar', where: 'Islas pequeñas y cuestas', group: 'shot', icon: 'up-grip',
     costs: [50, 100, 200], values: [1, 1.5, 2, 2.6],
     fmt: (v) => (v === 1 ? 'Normal' : `×${v}`),
   },
   {
-    id: 'magnet', name: 'Imán de hoyo', desc: 'El hoyo atrae la bola desde más lejos', icon: 'up-magnet',
+    id: 'magnet', name: 'Imán de hoyo', desc: 'El hoyo atrae la bola desde más lejos', where: 'El último golpe', group: 'shot', icon: 'up-magnet',
     costs: [50, 100, 200], values: [18, 28, 38, 50],
     fmt: (v) => `${Math.round(v / 12 * 10) / 10} casillas`,
   },
+
+  // --- Terreno y clima
   {
-    id: 'brake', name: 'Freno aéreo', desc: 'Botón para frenar la bola en el aire', icon: 'up-brake',
-    costs: [150], values: [0, 1],
+    id: 'wind', name: 'Cortavientos', desc: 'El viento empuja menos a la bola', where: 'Brisas de los tres mundos', group: 'terrain', icon: 'up-wind',
+    costs: [60, 120, 240], values: [1, 0.75, 0.5, 0.3],
+    fmt: (v) => (v === 1 ? 'Normal' : `-${pct(1 - v)} viento`),
+  },
+  {
+    id: 'boots', name: 'Botas', desc: 'Menos fuerza perdida en arena, rough y barro', where: 'Dunas, búnkers y Pantano', group: 'terrain', icon: 'up-boots',
+    costs: [60, 120, 240], values: [1, 0.65, 0.35, 0],
+    fmt: (v) => (v === 1 ? 'Normal' : v === 0 ? 'Sin pérdida' : `-${pct(1 - v)} pérdida`),
+  },
+  {
+    id: 'sink', name: 'Antihundimiento', desc: 'Tardas más en hundirte en la arena movediza', where: 'Pantano', group: 'terrain', icon: 'up-sink',
+    costs: [60, 120, 240], values: [1700, 2500, 3500, 5200],
+    fmt: (v) => (v === 1700 ? 'Normal' : `${(v / 1000).toFixed(1)} s`),
+  },
+  {
+    id: 'lantern', name: 'Linterna', desc: 'Ves más lejos cuando hay niebla', where: 'Niebla del Pantano', group: 'terrain', icon: 'up-lantern',
+    costs: [60, 120, 240], values: [1, 1.3, 1.65, 2.1],
+    fmt: (v) => (v === 1 ? 'Normal' : `×${v}`),
+  },
+  {
+    id: 'crumble', name: 'Suela firme', desc: 'Los bloques frágiles tardan más en caer', where: 'Muelles y nenúfares', group: 'terrain', icon: 'up-crumble',
+    costs: [60, 120, 240], values: [1, 1.4, 1.9, 2.6],
+    fmt: (v) => (v === 1 ? 'Normal' : `${((CRUMBLE_DELAY * v) / 1000).toFixed(1)} s`),
+  },
+
+  // --- Ayudas (usos por hoyo)
+  {
+    id: 'brake', name: 'Freno aéreo', desc: 'Botón para frenar la bola en el aire', where: 'Cuando te pasas de fuerza', group: 'help', icon: 'up-brake',
+    costs: [150, 300, 500], values: [0, 1, 2, 3],
     fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
   },
   {
-    id: 'shield', name: 'Salvavidas', desc: 'Anula penalizaciones de agua y sierras', icon: 'up-shield',
-    costs: [150], values: [0, 1],
+    id: 'shield', name: 'Salvavidas', desc: 'Anula penalizaciones de agua y sierras', where: 'Agua, sierras, cangrejos', group: 'help', icon: 'up-shield',
+    costs: [150, 300, 500], values: [0, 1, 2, 3],
     fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
   },
+  {
+    id: 'mulligan', name: 'Segunda oportunidad', desc: 'Deshaces tu último golpe, sin penalizar', where: 'Para no perder una estrella', group: 'help', icon: 'up-mulligan',
+    costs: [200, 400, 700], values: [0, 1, 2, 3],
+    fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
+  },
+];
+
+/** Nombre y orden de los grupos de la tienda */
+export const UPGRADE_GROUPS: { id: UpgradeGroup; name: string; color: string }[] = [
+  { id: 'shot', name: 'Golpe', color: 'gold' },
+  { id: 'terrain', name: 'Terreno', color: 'green' },
+  { id: 'help', name: 'Ayudas', color: 'purple' },
 ];
 
 /** Skins (ordenadas por rareza): la clásica viene de serie; el resto salen del gachapón */

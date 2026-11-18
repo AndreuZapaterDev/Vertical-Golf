@@ -1,7 +1,7 @@
 import { transitionTo } from './TransitionScene';
 import Phaser from 'phaser';
 import {
-  W, H, VIEW, TILE, GRAVITY, MAX_SPEED, MAX_DRAG, FOLLOW_OFFSET, BALL_R, STEP, MATERIALS, THEMES, PAL, hex, FONT, FONT_SCALE,
+  W, H, VIEW, TILE, GRAVITY, MAX_SPEED, MAX_DRAG, SHOT_POWER_EXPONENT, FOLLOW_OFFSET, BALL_R, STEP, MATERIALS, THEMES, PAL, hex, FONT, FONT_SCALE,
   type MaterialKey, type Theme, type ThemeKey,
 } from '../constants';
 import { LEVELS, parseLevel, windAt, fogAt, type ParsedLevel, type MechanicKey } from '../data/levels';
@@ -15,6 +15,9 @@ import { progress, type CoinLine } from '../systems/progress';
 import { SKINS, type Skin } from '../data/upgrades';
 import { trailById, ballTypeById, type Trail, type BallType } from '../data/cosmetics';
 import { saveScore } from '../services/supabase';
+import { generateDemoHole, DEMO_THEMES, type DemoHole } from '../systems/demoLevel';
+import { DemoSim, type MatterLib as DemoMatterLib } from '../systems/demoSim';
+import { DemoPilot } from '../systems/demoPilot';
 
 // ---------------------------------------------------------------- Tipos
 
@@ -131,6 +134,7 @@ export interface HudState {
   open: boolean;
   brakes: number;
   shields: number;
+  mulligans: number;
 }
 
 /** Resultado del hoyo para la ventana final */
@@ -169,7 +173,6 @@ const POWER_COLORS = [hex('#72d454'), hex('#ffd36b'), hex('#ff8a5c'), hex('#ef4d
 const powerColor = (p: number) => POWER_COLORS[Math.min(3, Math.floor(p * 4))];
 /** 12 puntos del contorno de la bola (para comprobar choques en la trayectoria sin recalcular senos y cosenos) */
 const RING = Array.from({ length: 12 }, (_, i) => [Math.cos((i / 12) * Math.PI * 2), Math.sin((i / 12) * Math.PI * 2)]);
-const SHOT_POWER_EXPONENT = 1.25;
 /** Cuánto se aleja la cámara con la máxima potencia (1/3 → zoom ×0,67, es decir, se ve 1,5 veces más mapa). Con 0 se desactiva */
 const AIM_ZOOM_OUT = 1 / 3;
 /** Límites del zoom con la rueda del ratón (relativo al zoom normal) */
@@ -184,6 +187,14 @@ const shotPower = (dragLength: number) => Math.pow(Phaser.Math.Clamp(dragLength 
  * Estados: intro → play → sinking → done
  */
 export default class GameScene extends Phaser.Scene {
+  // --- modo demo (partida de fondo del menú: la juega sola una IA, sin guardar nada ni mostrar HUD; ver DemoScene)
+  demo = false;
+  demoHole: DemoHole | null = null;
+  pilot: DemoPilot | null = null;
+  demoLeaving = false;
+  /** desplazamiento vertical de la cámara respecto a la bola (la bola queda por debajo del centro) */
+  followY = FOLLOW_OFFSET;
+
   // --- hoyo
   levelIndex = 0;
   L!: ParsedLevel;
@@ -230,9 +241,12 @@ export default class GameScene extends Phaser.Scene {
   safe: { x: number; y: number; body: GameBody | null; dx?: number } = { x: 0, y: 0, body: null };
 
   // --- mejoras de la cuenta
-  stats = { power: 1, aim: 0.3, grip: 1, magnet: 18 };
+  stats = { power: 1, aim: 0.3, grip: 1, magnet: 18, wind: 1, boots: 1, sinkMs: 1700, lantern: 1, crumble: 1 };
   brakes = 0;
   shields = 0;
+  /** deshacer el último golpe: usos que quedan y desde dónde salió el último golpe */
+  mulligans = 0;
+  shotFrom: { x: number; y: number; body: GameBody | null; dx: number; strokes: number } | null = null;
   skin!: Skin;
   trail!: Trail;
   /** tipo de pelota equipado (física) */
@@ -323,14 +337,26 @@ export default class GameScene extends Phaser.Scene {
   pan: { x: number; y: number; scrollX: number; scrollY: number; touch: boolean } | null = null;
   onRestart!: () => void;
   onShootKey!: () => void;
+  onUndoKey!: () => void;
 
-  constructor() {
-    super('Game');
+  constructor(key = 'Game') {
+    super(key);
   }
 
-  init(data?: { levelIndex?: number }) {
-    this.levelIndex = Phaser.Math.Clamp(data?.levelIndex ?? 0, 0, LEVELS.length - 1);
-    this.L = parseLevel(this.levelIndex);
+  init(data?: { levelIndex?: number; theme?: ThemeKey }) {
+    this.followY = this.demo ? 14 : FOLLOW_OFFSET;
+    this.demoLeaving = false;
+    this.pilot = null;
+    if (this.demo) {
+      // partida de fondo: hoyo aleatorio del mundo pedido (ver systems/demoLevel.ts)
+      const theme = data?.theme && DEMO_THEMES.includes(data.theme) ? data.theme : DEMO_THEMES[0];
+      this.demoHole = generateDemoHole(theme, (Date.now() ^ 0x9e3779b9) >>> 0);
+      this.levelIndex = 0;
+      this.L = this.demoHole.L;
+    } else {
+      this.levelIndex = Phaser.Math.Clamp(data?.levelIndex ?? 0, 0, LEVELS.length - 1);
+      this.L = parseLevel(this.levelIndex);
+    }
     this.P = THEMES[this.L.theme];
     this.worldH = this.L.rows * T;
     this.worldW = this.L.cols * T;
@@ -362,18 +388,28 @@ export default class GameScene extends Phaser.Scene {
 
     // Mejoras de la cuenta
     // Tipo de pelota: sus multiplicadores se suman a los de las mejoras
-    this.ballType = ballTypeById(progress.ball);
+    // (en la demo siempre la bola y las mejoras de una cuenta nueva: la IA planifica con esa física; solo el aspecto es el tuyo)
+    this.ballType = ballTypeById(this.demo ? 'standard' : progress.ball);
     const bt = this.ballType;
     this.ballR = bt.radius ?? BALL_R;
     this.ballScale = this.ballR / BALL_R;
-    this.stats = {
-      power: progress.stat('power') * (bt.power ?? 1),
-      aim: progress.stat('aim'),
-      grip: progress.stat('grip') * (bt.grip ?? 1),
-      magnet: progress.stat('magnet') * (bt.magnet ?? 1),
-    };
-    this.brakes = progress.stat('brake');
-    this.shields = progress.stat('shield');
+    this.stats = this.demo
+      ? { power: 1, aim: 0.3, grip: 1, magnet: 18, wind: 1, boots: 1, sinkMs: 1700, lantern: 1, crumble: 1 }
+      : {
+          power: progress.stat('power') * (bt.power ?? 1),
+          aim: progress.stat('aim'),
+          grip: progress.stat('grip') * (bt.grip ?? 1),
+          magnet: progress.stat('magnet') * (bt.magnet ?? 1),
+          wind: progress.stat('wind'),
+          boots: progress.stat('boots'),
+          sinkMs: progress.stat('sink'),
+          lantern: progress.stat('lantern'),
+          crumble: progress.stat('crumble'),
+        };
+    this.brakes = this.demo ? 0 : progress.stat('brake');
+    this.shields = this.demo ? 0 : progress.stat('shield');
+    this.mulligans = this.demo ? 0 : progress.stat('mulligan');
+    this.shotFrom = null;
     this.skin = SKINS.find((s) => s.id === progress.skin) || SKINS[0];
     this.trail = trailById(progress.trail);
     this.trailColor = this.trail.colors[this.trail.colors.length - 1];
@@ -405,13 +441,15 @@ export default class GameScene extends Phaser.Scene {
     this.zoomK = 1;
     this.wheelZoom = 1;
     this.curWind = windAt(L, this.L.start.r * T + T);
-    sfx.wind(this.curWind);
-    sfx.sea(L.theme === 'beach');
-    if (L.theme === 'swamp') this.time.addEvent({ delay: 2600, loop: true, callback: () => { const r = Math.random(); if (r < 0.5) sfx.croak(); else if (r < 0.8) sfx.bubble(); } });
+    if (!this.demo) {
+      sfx.wind(this.curWind);
+      sfx.sea(L.theme === 'beach');
+      if (L.theme === 'swamp') this.time.addEvent({ delay: 2600, loop: true, callback: () => { const r = Math.random(); if (r < 0.5) sfx.croak(); else if (r < 0.8) sfx.bubble(); } });
+    }
     // niebla (Pantano): un velo con un claro redondo que sigue a la bola
     this.fog = null;
     this.fogDensity = 0;
-    if (L.fogBands.length) this.fog = this.add.image(0, 0, 'fog').setScrollFactor(0).setDepth(20).setAlpha(0).setDisplaySize(960, 960);
+    if (L.fogBands.length) this.fog = this.add.image(0, 0, 'fog').setScrollFactor(0).setDepth(20).setAlpha(0).setDisplaySize(960 * this.stats.lantern, 960 * this.stats.lantern);
     this.sinkTime = 0;
     // En los hoyos abiertos la cámara deja ver un poco de vacío alrededor (se nota que son islas)
     const side = L.open ? 3 * T : 0;
@@ -464,11 +502,14 @@ export default class GameScene extends Phaser.Scene {
       .setDisplaySize(W, H)
       .setScrollFactor(0)
       .setDepth(40);
-    this.camOff = { x: 0, y: FOLLOW_OFFSET };
+    this.camOff = { x: 0, y: this.followY };
     this.buildSky();
-    music.play(L.theme);
-    music.setPaused(false);
-    const terrainKey = renderTerrain(this, 'terrain', L.grid, L.theme, { open: L.open });
+    if (!this.demo) {
+      music.play(L.theme);
+      music.setPaused(false);
+    }
+    // (la demo usa su propia textura: el juego de verdad puede arrancar mientras la demo aún se apaga)
+    const terrainKey = renderTerrain(this, this.demo ? 'terrain-demo' : 'terrain', L.grid, L.theme, { open: L.open });
     // sombra proyectada del terreno sobre el fondo (da profundidad)
     tintFill(this.add.image(3, 4, terrainKey), 0x1a1020).setOrigin(0).setAlpha(0.16).setDepth(-5);
     this.add.image(0, 0, terrainKey).setOrigin(0).setDepth(5);
@@ -494,22 +535,33 @@ export default class GameScene extends Phaser.Scene {
     this.createBall();
     this.createFx();
     this.aimGfx = this.add.graphics().setDepth(30);
-    this.setupInput();
+    if (!this.demo) this.setupInput();
 
     this.onCollStart = (e) => this.onCollide(e, true);
     this.onCollActive = (e) => this.onCollide(e, false);
     this.matter.world.on('collisionstart', this.onCollStart);
     this.matter.world.on('collisionactive', this.onCollActive);
 
-    this.scene.stop('UI');
-    this.scene.launch('UI', { bus: this.bus, gameScene: this });
+    if (this.demo && this.demoHole) {
+      // la IA juega sola: planifica con su propia simulación del mismo terreno
+      const sim = new DemoSim(L, (Phaser.Physics.Matter as unknown as { Matter: DemoMatterLib }).Matter);
+      this.pilot = new DemoPilot(this, sim, this.demoHole.stops);
+      cam.fadeIn(700, 0, 0, 0);
+      this.game.events.emit('demo-hole', { worldName: L.worldName, theme: L.theme });
+    } else {
+      this.scene.stop('UI');
+      this.scene.launch('UI', { bus: this.bus, gameScene: this });
+    }
 
     this.events.once('shutdown', () => {
       this.bus.removeAllListeners();
-      this.teardownInput();
+      if (!this.demo) this.teardownInput();
       this.offLook?.();
-      sfx.wind(0);
-      sfx.sea(false);
+      if (!this.demo) {
+        sfx.wind(0);
+        sfx.sea(false);
+      }
+      this.pilot = null;
       this.matter.world?.off('collisionstart', this.onCollStart);
       this.matter.world?.off('collisionactive', this.onCollActive);
       // el siguiente hoyo empieza con listas limpias (la escena se reutiliza)
@@ -1132,7 +1184,7 @@ export default class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.centerOn(this.cupPos.x, this.cupPos.y + 30);
     this.introTimer = this.time.delayedCall(1200, () => {
-      const target = this.startPos.y - FOLLOW_OFFSET;
+      const target = this.startPos.y - this.followY;
       const dist = Math.hypot(target - cam.midPoint.y, this.startPos.x - cam.midPoint.x);
       const duration = Phaser.Math.Clamp(dist * 2.5, 600, 2400);
       cam.pan(this.startPos.x, target, duration, 'Sine.easeInOut', false, (_c, prog) => {
@@ -1151,7 +1203,7 @@ export default class GameScene extends Phaser.Scene {
     this.state = 'play';
     const cam = this.cameras.main;
     cam.panEffect.reset();
-    cam.startFollow(this.ballSprite, false, 0.1, 0.1, 0, FOLLOW_OFFSET);
+    cam.startFollow(this.ballSprite, false, 0.1, 0.1, 0, this.followY);
     this.bus.emit('play');
   }
 
@@ -1219,6 +1271,7 @@ export default class GameScene extends Phaser.Scene {
       if (this.aimVec.length() >= 6 && this.ready) this.shoot(this.aimVec);
     };
     this.onRestart = () => this.restartLevel();
+    this.onUndoKey = () => this.useMulligan();
     this.onShootKey = () => {
       sfx.unlock();
       if (this.state === 'intro') return this.skipIntro();
@@ -1259,6 +1312,7 @@ export default class GameScene extends Phaser.Scene {
     if (kb) {
       kb.on('keydown-R', this.onRestart);
       kb.on('keydown-SPACE', this.onShootKey);
+      kb.on('keydown-Z', this.onUndoKey);
       kb.on('keydown-ENTER', this.onShootKey);
       this.keys = kb.addKeys('LEFT,RIGHT,UP,DOWN,A,D,W,S,SHIFT', false) as GameScene['keys'];
     }
@@ -1276,6 +1330,7 @@ export default class GameScene extends Phaser.Scene {
     const kb = this.input.keyboard;
     kb?.off('keydown-R', this.onRestart);
     kb?.off('keydown-SPACE', this.onShootKey);
+    kb?.off('keydown-Z', this.onUndoKey);
     kb?.off('keydown-ENTER', this.onShootKey);
   }
 
@@ -1351,7 +1406,7 @@ export default class GameScene extends Phaser.Scene {
     if (step > this.chargeStep) {
       if (step === 4) {
         sfx.chargeMax();
-        haptic(8);
+        this.buzz(8);
       } else sfx.charge(step);
     }
     this.chargeStep = step;
@@ -1375,6 +1430,12 @@ export default class GameScene extends Phaser.Scene {
 
   currentMat(): MaterialKey {
     return this.groundBody?.mat || 'grass';
+  }
+
+  /** Multiplicador de potencia del golpe desde un suelo; las Botas recortan la pérdida de la arena, el rough y el barro */
+  matPower(mat: MaterialKey): number {
+    const p = MATERIALS[mat].power;
+    return p >= 1 ? p : 1 - (1 - p) * this.stats.boots; // (la seta turbo, que da más fuerza, no se toca)
   }
 
   carrierVelocity() {
@@ -1432,7 +1493,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Temblor de cámara (respeta el ajuste "Temblor") */
   shake(duration: number, intensity: number) {
-    if (progress.settings.shake) this.cameras.main.shake(duration, intensity);
+    if (progress.settings.shake && !this.demo) this.cameras.main.shake(duration, intensity);
   }
 
   /**
@@ -1455,7 +1516,7 @@ export default class GameScene extends Phaser.Scene {
     if (impact > 260) {
       this.hitStop = Math.max(this.hitStop, 30);
       this.shake(70, 0.003);
-      haptic(12);
+      this.buzz(12);
     }
     if (floor) {
       this.dust.particleTint = MATERIALS[mat].dust;
@@ -1526,7 +1587,7 @@ export default class GameScene extends Phaser.Scene {
     this.ringFx(bumper.position.x, bumper.position.y, { r: 16, flat: 1, color: 0xffd36b, duration: 260 });
     this.shake(80, 0.004);
     this.hitStop = Math.max(this.hitStop, 45);
-    haptic(20);
+    this.buzz(20);
     sfx.bumper();
   }
 
@@ -1589,7 +1650,7 @@ export default class GameScene extends Phaser.Scene {
       }
       if (gb.crumble && gb.crumble.state === 'idle') this.startCrumble(gb.crumble);
     } else {
-      vx += windAt(this.L, this.ball.position.y) * (this.ballType.wind ?? 1) * dt;
+      vx += windAt(this.L, this.ball.position.y) * (this.ballType.wind ?? 1) * this.stats.wind * dt;
       // gravedad propia del tipo (Matter ya aplica la normal: se suma solo la diferencia)
       vy += GRAVITY * ((this.ballType.gravity ?? 1) - 1) * dt;
     }
@@ -1663,7 +1724,7 @@ export default class GameScene extends Phaser.Scene {
     cr.state = 'shaking';
     sfx.crack();
     const shake = this.tweens.add({ targets: cr.sprite, x: cr.x + 1, duration: 40, yoyo: true, repeat: -1 });
-    this.time.delayedCall(CRUMBLE_DELAY, () => {
+    this.time.delayedCall(CRUMBLE_DELAY * this.stats.crumble, () => {
       shake.stop();
       cr.sprite.x = cr.x;
       cr.state = 'fallen';
@@ -1694,7 +1755,7 @@ export default class GameScene extends Phaser.Scene {
     const power = shotPower(v.length());
     this.wheelZoom = 1; // al disparar, el zoom vuelve al normal
     const dir = v.clone().normalize();
-    const sp = power * MAX_SPEED * this.stats.power * MATERIALS[mat].power;
+    const sp = power * MAX_SPEED * this.stats.power * this.matPower(mat);
     this.setVel(dir.x * sp + this.carrierVelocity(), dir.y * sp);
     Body.setAngularVelocity(this.ball, 0);
 
@@ -1702,6 +1763,10 @@ export default class GameScene extends Phaser.Scene {
     this.grounded = false;
     this.ready = false;
     this.restTime = 0;
+    // por si se usa la Segunda oportunidad: de dónde sale este golpe y cuántos llevabas
+    const from = this.ball.position;
+    const gb = this.groundBody;
+    this.shotFrom = { x: from.x, y: from.y, body: gb, dx: gb ? from.x - gb.position.x : 0, strokes: this.strokes };
     this.strokes++;
     this.readyRing.clear();
 
@@ -1727,7 +1792,7 @@ export default class GameScene extends Phaser.Scene {
       this.hitStop = 45;
     }
     this.ringFx(p.x, p.y + this.ballR, { r: 6 + power * 10, flat: 0.4, duration: 260 });
-    haptic(Math.round(8 + power * 22));
+    this.buzz(Math.round(8 + power * 22));
 
     this.bus.emit('shot', this.strokes);
     this.emitHud();
@@ -1742,7 +1807,7 @@ export default class GameScene extends Phaser.Scene {
 
     const power = shotPower(len);
     const dir = v.clone().normalize();
-    const sp = power * MAX_SPEED * this.stats.power * MATERIALS[this.currentMat()].power;
+    const sp = power * MAX_SPEED * this.stats.power * this.matPower(this.currentMat());
     const col = powerColor(power);
     const ink = hex(this.P.outline);
 
@@ -1754,7 +1819,7 @@ export default class GameScene extends Phaser.Scene {
     const n = Math.ceil(this.stats.aim / st); // la mejora "Visor" alarga la trayectoria visible
     let impact = false;
     for (let i = 1; i <= n; i++) {
-      vx += windAt(this.L, y) * (this.ballType.wind ?? 1) * st;
+      vx += windAt(this.L, y) * (this.ballType.wind ?? 1) * this.stats.wind * st;
       vy += GRAVITY * (this.ballType.gravity ?? 1) * st;
       x += vx * st;
       y += vy * st;
@@ -1950,12 +2015,12 @@ export default class GameScene extends Phaser.Scene {
     // la cámara se adelanta hacia donde apuntas
     if (this.state === 'play') {
       let tx = 0;
-      let ty = FOLLOW_OFFSET;
-      if (this.aiming && this.aimVec.length() > 6) {
+      let ty = this.followY;
+      if (this.aiming && this.aimVec.length() > 6 && !this.demo) {
         const k = Math.min(this.aimVec.length() / MAX_DRAG, 1) * 55;
         const d = this.aimVec.clone().normalize();
         tx = -d.x * k;
-        ty = FOLLOW_OFFSET - d.y * k;
+        ty = this.followY - d.y * k;
       }
       this.camOff.x += (tx - this.camOff.x) * 0.06;
       this.camOff.y += (ty - this.camOff.y) * 0.06;
@@ -1972,7 +2037,7 @@ export default class GameScene extends Phaser.Scene {
 
       // zoom out según la potencia al apuntar: cuanto más fuerte el golpe, más mapa se ve. Al disparar vuelve al zoom normal
       let zt = 1;
-      if (this.aiming && this.aimVec.length() > 6) zt = 1 - AIM_ZOOM_OUT * shotPower(this.aimVec.length());
+      if (this.aiming && this.aimVec.length() > 6 && !this.demo) zt = 1 - AIM_ZOOM_OUT * shotPower(this.aimVec.length());
       zt *= this.wheelZoom;
       // El zoom se asienta siempre en un valor entero (píxeles perfectos): con zoom fraccionario el pixel art sale irregular y los textos, borrosos
       zt = Math.max(1, Math.round(VIEW.Z * zt)) / VIEW.Z;
@@ -2036,7 +2101,7 @@ export default class GameScene extends Phaser.Scene {
           this.dust.explode(2, cx, cy + this.ballR);
           sfx.bubble();
         }
-        if (this.sinkTime > 1700) {
+        if (this.sinkTime > this.stats.sinkMs) {
           this.sinkTime = 0;
           this.penalty(cx, cy, 'sink');
           return;
@@ -2078,13 +2143,14 @@ export default class GameScene extends Phaser.Scene {
     } else if (!canShoot && this.ready && !this.aiming) {
       this.ready = false;
     }
-    if (this.ready) this.updateKeyboardAim(delta);
+    if (this.demo) this.pilot?.update(delta);
+    else if (this.ready) this.updateKeyboardAim(delta);
     if (this.aiming) this.chargeFeedback();
 
-    // contador de golpes sobre la bola y anillo de "listo"
-    this.counter.setVisible(this.ready || this.aiming).setText(String(this.strokes)).setPosition(cx, cy - 4 - this.ballR);
+    // contador de golpes sobre la bola y anillo de "listo" (la demo no los enseña)
+    this.counter.setVisible(!this.demo && (this.ready || this.aiming)).setText(String(this.strokes)).setPosition(cx, cy - 4 - this.ballR);
     this.readyRing.clear();
-    if (this.ready && !this.aiming) {
+    if (this.ready && !this.aiming && !this.demo) {
       const t = ((this.time.now - this.readyTime) % 1000) / 1000;
       this.readyRing.lineStyle(1.2, 0xffffff, 0.9 * (1 - t)).strokeCircle(cx, cy, 2 + this.ballR + t * 7);
     }
@@ -2113,7 +2179,7 @@ export default class GameScene extends Phaser.Scene {
     const hide = () => {
       if (ptr.badge.visible) ptr.badge.setVisible(false), ptr.wedge.setVisible(false);
     };
-    if (!show || this.aiming) return hide();
+    if (!show || this.aiming || this.demo) return hide();
     const v = this.cameras.main.worldView;
     const { x: hx } = this.cupPos;
     const hy = this.cupPos.y - 8;
@@ -2193,9 +2259,59 @@ export default class GameScene extends Phaser.Scene {
     this.sparks.explode(8, p.x, p.y);
     this.tweens.add({ targets: this.ballSprite, scale: 1.4 * this.ballScale, duration: 80, yoyo: true });
     this.trailPts = [];
-    haptic(25);
+    this.buzz(25);
     sfx.brake();
     this.bus.emit('brake', this.brakes);
+  }
+
+  /** ¿Se puede deshacer el último golpe ahora mismo? */
+  canMulligan() {
+    return this.mulligans > 0 && !!this.shotFrom && this.state === 'play' && !this.respawning && !this.frozen && !this.aiming;
+  }
+
+  /**
+   * Segunda oportunidad: la bola vuelve a donde salió el último golpe y ese golpe no cuenta.
+   * Sirve también en pleno vuelo (si te das cuenta de que has fallado).
+   */
+  useMulligan() {
+    if (!this.canMulligan() || !this.shotFrom) return;
+    const f = this.shotFrom;
+    this.shotFrom = null;
+    this.mulligans--;
+    this.strokes = f.strokes;
+    // un bloque frágil que ya se está cayendo no es sitio seguro: se vuelve a la salida
+    let p: Vec = { x: f.x, y: f.y };
+    if (f.body?.mover) p = { x: f.body.position.x + f.dx, y: f.y };
+    else if (f.body?.crumble && f.body.crumble.state !== 'idle') p = { ...this.startPos };
+
+    this.respawning = true;
+    this.ready = false;
+    this.readyRing.clear();
+    this.counter.setVisible(false);
+    this.freezeBall(true);
+    this.trailPts = [];
+    this.trailG.clear();
+    sfx.whoosh();
+    this.buzz(25);
+    const from = this.ball.position;
+    this.ringFx(from.x, from.y, { r: 12, color: 0x9ad8ff, duration: 300 });
+    this.tweens.add({ targets: this.ballSprite, scale: 0, alpha: 0, duration: 170, ease: 'Quad.easeIn' });
+    this.time.delayedCall(260, () => {
+      this.resumeFollow();
+      Body.setPosition(this.ball, p);
+      this.freezeBall(false);
+      this.setVel(0, 0);
+      this.groundTime = -1000;
+      this.restTime = 0;
+      this.safe = { x: p.x, y: p.y, body: f.body, dx: f.dx };
+      this.ballSprite.setPosition(p.x, p.y).setVisible(true).setAlpha(1).setScale(0);
+      this.tweens.add({ targets: this.ballSprite, scale: this.ballScale, duration: 250, ease: 'Back.easeOut' });
+      this.sparks.explode(8, p.x, p.y);
+      this.ringFx(p.x, p.y, { r: 12, color: 0x9ad8ff, duration: 300 });
+      this.respawning = false;
+    });
+    this.bus.emit('mulligan', this.mulligans);
+    this.emitHud();
   }
 
   /** Agua, sierra o fuera de límites: +1 golpe y vuelta a la última posición segura */
@@ -2204,7 +2320,7 @@ export default class GameScene extends Phaser.Scene {
     this.aiming = false;
     this.kbAiming = false;
     this.ready = false;
-    haptic(kind === 'saw' ? [40, 30, 60] : 50);
+    this.buzz(kind === 'saw' ? [40, 30, 60] : 50);
     this.holePtr?.wedge.setVisible(false);
     this.holePtr?.badge.setVisible(false);
     this.aimGfx.clear();
@@ -2285,7 +2401,7 @@ export default class GameScene extends Phaser.Scene {
       onComplete: () => this.ballSprite.setVisible(false).setAngle(0),
     });
     sfx.hole();
-    haptic([20, 40, 30, 40, 50]);
+    this.buzz([20, 40, 30, 40, 50]);
     this.time.delayedCall(200, () => {
       this.confetti.explode(60, x, y - 4);
       this.sparks.explode(14, x, y - 4);
@@ -2300,6 +2416,12 @@ export default class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: this.cupGlow, alpha: 0.9, scale: 1.4, duration: 200, yoyo: true });
       this.popWord(x, y - 14);
     });
+
+    // la demo no guarda nada ni enseña resultados: celebra y pasa a otro hoyo
+    if (this.demo) {
+      this.time.delayedCall(2400, () => this.demoNext());
+      return;
+    }
 
     const par = this.L.par;
     const stars = this.strokes <= par ? 3 : this.strokes <= par + 2 ? 2 : 1;
@@ -2333,6 +2455,21 @@ export default class GameScene extends Phaser.Scene {
         hasNext,
       });
     });
+  }
+
+  /** Modo demo: se funde a negro y empieza otra partida de fondo en el mundo siguiente */
+  demoNext() {
+    if (!this.demo || this.demoLeaving) return;
+    this.demoLeaving = true;
+    const theme = DEMO_THEMES[(DEMO_THEMES.indexOf(this.L.theme) + 1) % DEMO_THEMES.length];
+    const cam = this.cameras.main;
+    cam.fadeOut(650, 0, 0, 0);
+    cam.once('camerafadeoutcomplete', () => this.scene.restart({ theme }));
+  }
+
+  /** Vibración del móvil (la partida de fondo del menú no vibra) */
+  buzz(pattern: number | number[]) {
+    if (!this.demo) haptic(pattern);
   }
 
   /** Palabra que salta del hoyo: ¡Birdie!, ¡Par!… */
@@ -2375,6 +2512,7 @@ export default class GameScene extends Phaser.Scene {
       open: L.open,
       brakes: this.brakes,
       shields: this.shields,
+      mulligans: this.mulligans,
     };
   }
 

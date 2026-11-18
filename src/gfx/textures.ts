@@ -230,6 +230,36 @@ export function generateTextures(scene: Phaser.Scene) {
       return Math.floor((Math.atan2(dy, dx) + Math.PI) / (Math.PI / 2)) % 2 ? '#ef4d5e' : '#ffffff';
     }, '#35282c'),
   );
+  // Cortavientos: tres ráfagas
+  icon('up-wind', [
+    '.............', '..ccccccc....', '.........cc..', '.........cc..', '..cccccc.c...', '.............', 'ccccccccccc..',
+    '...........c.', '...........cc', '..........cc.', '.cccccccc....', '.............', '.............',
+  ], { c: '#7fe3f5' });
+  // Botas
+  icon('up-boots', [
+    '.............', '...ooooo.....', '...obbbo.....', '...obbbo.....', '...obbbo.....', '...obbbooo...', '...obbbbbbo..',
+    '..obbbbbbbbo.', '..obbbbbbbbo.', '..ooooooooo..', '..owwwwwwwo..', '..ooooooooo..', '.............',
+  ], { b: '#c8834f', w: '#fff4dc' });
+  // Antihundimiento: bola sobre un remolino de arena
+  icon('up-sink', [
+    '.............', '.....ooo.....', '....owwwo....', '....owwwo....', '.....ooo.....', '..yyyyyyyyy..', '.ydddddddddy.',
+    '..yyddddyyy..', '...yydddyy...', '....yyyyy....', '.....yyy.....', '.............', '.............',
+  ], { w: '#ffffff', y: '#e6d99c', d: '#b8a468' });
+  // Linterna
+  icon('up-lantern', [
+    '.....ooo.....', '....o...o....', '....ooooo....', '...ooyyyoo...', '...oyyYyyo...', '...oyYYYyo...', '...oyyYyyo...',
+    '...ooyyyoo...', '....ooooo....', '.....ooo.....', '.............', '.............', '.............',
+  ], { y: '#ffd36b', Y: '#fff6cc' });
+  // Suela firme: bloque con grieta
+  icon('up-crumble', [
+    '.............', '.ooooooooooo.', '.obbbbbbbbbo.', '.obbbbbdbbbo.', '.obbbbdbbbbo.', '.obbbdbbbbbo.', '.obbbbdbbbbo.',
+    '.obbbbbdbbbo.', '.obbbbbbdbbo.', '.obbbbbbbbbo.', '.ooooooooooo.', '.............', '.............',
+  ], { b: '#e39880', d: '#8a5a3c' });
+  // Segunda oportunidad: flecha que da la vuelta
+  icon('up-mulligan', [
+    '.............', '.....gggg....', '...gg....gg..', '..g........g.', '.ggg.......g.', 'ggggg......g.', '.ggg.......g.',
+    '..g........g.', '...gg....gg..', '.....gggg....', '.............', '.............', '.............',
+  ], { g: '#9ad8ff' });
   icon('up-gem', [
     '.............', '.c...ooooo...', '..c.obwccdo..', '....bwcccddo.', '.c.occcccdeo.', '...occcccdeo.', '....occcdeo..',
     '.c...occdeo..', '......odeo...', '.......oo....', '..c..........', '.............', '.............',
@@ -1343,34 +1373,117 @@ function generateMeadow(scene: Phaser.Scene) {
 
 // ------------------------------------------------------------------ interfaz
 
+/** '#rrggbb' + opacidad → 'rgba(...)' */
+function rgbaHex(hex: string, a: number) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 0xff},${(n >> 8) & 0xff},${n & 0xff},${a})`;
+}
+
+/**
+ * Marco de panel (se usa como NineSlice): contorno oscuro con esquinas cortadas, canto de luz arriba/izquierda y de sombra
+ * abajo/derecha, línea de sombra interior (opcional), relleno con degradado vertical (el centro se estira, así que el degradado
+ * abarca todo el panel) y un brillo fino bajo el borde. `stud`: remaches dorados con luz en las cuatro esquinas.
+ */
 function frame(
   scene: Phaser.Scene,
   key: string,
   size: number,
-  { outline, light, dark, fill, stud }: { outline: string; light: string; dark: string; fill: string; stud?: string },
+  { outline, light, dark, top, bottom, alpha, stud, inner, sunken, round }: {
+    outline: string; light: string; dark: string; top: string; bottom: string; alpha: number;
+    stud?: boolean; inner?: boolean;
+    /** hundido (caja de texto): el canto oscuro va arriba/izquierda y el de luz abajo/derecha */
+    sunken?: boolean;
+    /** esquinas redondeadas de 2 px en vez de cortadas de 1 */
+    round?: boolean;
+  },
 ) {
   make(scene, key, size, size, (c) => {
     const s = size;
-    rect(c, 1, 0, s - 2, s, outline);
-    rect(c, 0, 1, s, s - 2, outline);
-    rect(c, 1, 1, s - 2, s - 2, light);
-    rect(c, 2, 2, s - 3, s - 3, dark);
-    rect(c, 2, 2, s - 4, s - 4, fill);
-    if (stud) for (const [x, y] of [[3, 3], [s - 4, 3], [3, s - 4], [s - 4, s - 4]]) px(c, x, y, stud);
+    const first = inner ? 3 : 2; // primera fila/columna del relleno
+    for (let y = 0; y < s; y++) {
+      for (let x = 0; x < s; x++) {
+        const dl = x, dr = s - 1 - x, dt = y, db = s - 1 - y;
+        // esquinas: s = distancia en escalera a la esquina más cercana
+        const cs = Math.min(dl, dr) + Math.min(dt, db);
+        if (round) {
+          if (Math.min(dl, dr) < 3 && Math.min(dt, db) < 3) {
+            if (cs <= 1) continue; // recortada
+            if (cs === 2) {
+              px(c, x, y, outline);
+              continue;
+            }
+          }
+        } else if ((dl === 0 || dr === 0) && (dt === 0 || db === 0)) continue; // esquina cortada
+        const ring = Math.min(dl, dr, dt, db);
+        const lit = dt === 1 || dl === 1; // canto de arriba/izquierda
+        if (ring === 0) px(c, x, y, outline);
+        else if (ring === 1) px(c, x, y, lit !== !!sunken ? light : dark);
+        else if (inner && ring === 2) px(c, x, y, 'rgba(24,14,18,0.62)');
+        else {
+          let col = blendHex(top, bottom, Math.min(1, Math.max(0, (y - first) / Math.max(1, s - first * 2 - 1))));
+          if (y === first) col = blendHex(col, '#ffffff', 0.13); // brillo bajo el borde de arriba
+          px(c, x, y, rgbaHex(col, alpha));
+        }
+      }
+    }
+    if (stud) {
+      for (const [x, y] of [[3, 3], [s - 5, 3], [3, s - 5], [s - 5, s - 5]]) {
+        rect(c, x, y, 2, 2, '#f2b43a');
+        px(c, x, y, '#fff0a0');
+        px(c, x + 1, y + 1, '#a8611f');
+      }
+    }
   });
 }
 
+/**
+ * Botón de 3 estados (NineSlice 5,5,5,7): `key` (reposo, con labio grueso abajo y brillo arriba), `key-hover` (cara más clara)
+ * y `key-down` (pulsado: el labio se aplasta y la cara baja). La cara lleva degradado vertical.
+ */
 function button9(scene: Phaser.Scene, key: string, face: string, light: string, dark: string, lip: string) {
-  make(scene, key, 16, 18, (c) => {
-    rect(c, 1, 0, 14, 18, '#35282c');
-    rect(c, 0, 1, 16, 16, '#35282c');
-    rect(c, 1, 1, 14, 15, lip);
-    rect(c, 1, 1, 14, 12, face);
-    rect(c, 2, 1, 12, 1, light);
-    rect(c, 1, 2, 1, 10, light);
-    rect(c, 2, 2, 3, 1, '#ffffff');
-    rect(c, 14, 2, 1, 11, dark);
-  });
+  const OUT = '#35282c';
+  for (const state of ['up', 'hover', 'down'] as const) {
+    make(scene, state === 'up' ? key : `${key}-${state}`, 16, 18, (c) => {
+      const down = state === 'down';
+      const f = state === 'hover' ? blendHex(face, '#ffffff', 0.2) : face;
+      const lipTop = down ? 15 : 13; // el labio (grosor 3) se reduce a 1 px al pulsar
+      const lastFace = lipTop - 1;
+      for (let y = 0; y < 18; y++) {
+        for (let x = 0; x < 16; x++) {
+          // esquinas redondeadas de 2 px
+          const cs = Math.min(x, 15 - x) + Math.min(y, 17 - y);
+          if (Math.min(x, 15 - x) < 3 && Math.min(y, 17 - y) < 3) {
+            if (cs <= 1) continue;
+            if (cs === 2) {
+              px(c, x, y, OUT);
+              continue;
+            }
+          }
+          if (x === 0 || x === 15 || y === 0 || y >= 16) {
+            px(c, x, y, OUT);
+            continue;
+          }
+          if (y >= lipTop) {
+            px(c, x, y, y === lipTop && !down ? blendHex(lip, f, 0.3) : lip);
+            continue;
+          }
+          const t = (y - 1) / (lastFace - 1);
+          let col = down
+            ? blendHex(blendHex(f, dark, 0.3), blendHex(f, dark, 0.55), t)
+            : blendHex(blendHex(f, light, 0.42), blendHex(f, dark, 0.5), t);
+          if (down) {
+            if (y <= 2) col = blendHex(f, dark, 0.7); // sombra interior de arriba
+            else if (x === 1) col = blendHex(f, dark, 0.5);
+            else if (x === 14) col = blendHex(f, light, 0.2);
+          } else if (y === 1) col = blendHex(f, light, 0.8); // canto de luz
+          else if (x === 1 && y >= 2) col = blendHex(f, light, 0.6);
+          else if (x === 14 && y >= 2) col = blendHex(f, dark, 0.75);
+          else if ((y === 2 && x >= 3 && x <= 7) || (y === 3 && x === 3)) col = '#ffffff'; // destello
+          px(c, x, y, col);
+        }
+      }
+    });
+  }
 }
 
 const ICONS: Record<string, string[]> = {
@@ -1385,8 +1498,10 @@ const ICONS: Record<string, string[]> = {
 };
 
 function generateUi(scene: Phaser.Scene) {
-  frame(scene, 'panel9', 12, { outline: '#35282c', light: '#fff4dc', dark: '#c8834f', fill: 'rgba(58,40,44,0.94)', stud: '#f2b43a' });
-  frame(scene, 'hud9', 8, { outline: '#35282c', light: '#fff4dc', dark: '#b47143', fill: 'rgba(58,40,44,0.88)' });
+  frame(scene, 'panel9', 12, { outline: '#35282c', light: '#fff4dc', dark: '#c8834f', top: '#51393f', bottom: '#33242a', alpha: 0.95, stud: true, inner: true, round: true });
+  frame(scene, 'hud9', 8, { outline: '#35282c', light: '#fff4dc', dark: '#b47143', top: '#523a40', bottom: '#382930', alpha: 0.9, round: true });
+  // caja de texto / campo: hundida (canto oscuro arriba, de luz abajo) y más oscura que el panel
+  frame(scene, 'field9', 8, { outline: '#2a1e22', light: '#9a7a62', dark: '#1a1216', top: '#22181c', bottom: '#33252b', alpha: 0.92, sunken: true, round: true });
   button9(scene, 'btn9-green', '#72d454', '#b4f282', '#4aa947', '#2c7a3a');
   button9(scene, 'btn9-blue', '#4a86e0', '#9cc8ff', '#3a6cc0', '#2a4e98');
   button9(scene, 'btn9-gold', '#f2b43a', '#ffe28a', '#d9922a', '#a8611f');

@@ -5,6 +5,7 @@ import MenuScene from './scenes/MenuScene';
 import LevelSelectScene from './scenes/LevelSelectScene';
 import WorldSelectScene from './scenes/WorldSelectScene';
 import GameScene from './scenes/GameScene';
+import DemoScene from './scenes/DemoScene';
 import UIScene from './scenes/UIScene';
 import TransitionScene from './scenes/TransitionScene';
 import ShopScene from './scenes/ShopScene';
@@ -44,6 +45,6 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
       debug,
     },
   },
-  // Orden de dibujado: Game < UI < Transition
-  scene: [BootScene, MenuScene, WorldSelectScene, LevelSelectScene, ShopScene, GameScene, UIScene, TransitionScene],
+  // Orden de dibujado: Demo (partida de fondo) < Menu < Game < UI < Transition
+  scene: [BootScene, DemoScene, MenuScene, WorldSelectScene, LevelSelectScene, ShopScene, GameScene, UIScene, TransitionScene],
 };

@@ -1,9 +1,6 @@
 import { transitionTo } from './TransitionScene';
 import Phaser from 'phaser';
-import { W, H, PAL, TILE, THEMES } from '../constants';
-import { Background } from '../gfx/background';
-import { renderTerrain } from '../gfx/terrain';
-import { tintFill } from '../gfx/tint';
+import { W, H, PAL, GAME_VERSION } from '../constants';
 import { openSettings, type SettingsPanel } from '../ui/settings';
 import { applyLook } from '../ui/looks';
 import { LEVELS } from '../data/levels';
@@ -14,28 +11,15 @@ import { fitCamera } from '../ui/camera';
 import { label, gradientFill, makeButton, iconButton, panel } from '../ui/widgets';
 import { isSupabaseEnabled } from '../services/supabase';
 
-// Escenario decorativo del menú, con el mismo pintor de terreno que los niveles
-const MENU_MAP = [
-  '....................',
-  '............../#####',
-  '##WWW#......########',
-  '####################',
-  '####################',
-  '####################',
-];
-
-type Cloud = Phaser.GameObjects.Image & { vx: number };
-
+/**
+ * Pantalla inicial. Lo que se ve detrás NO es un fondo dibujado: es una partida de verdad (DemoScene) con un hoyo
+ * aleatorio que juega sola una IA, y que va cambiando de mundo (Pradera, Playa, Pantano…). Este menú se pinta encima.
+ */
 export default class MenuScene extends Phaser.Scene {
-  bg!: Background;
-  clouds: Cloud[] = [];
   resetPanel: Phaser.GameObjects.Container | null = null;
-  ballY = 0;
-  ball!: Phaser.GameObjects.Sprite;
-  trail!: Phaser.GameObjects.Graphics;
-  trailPts: { x: number; y: number }[] = [];
-  dust!: Phaser.GameObjects.Particles.ParticleEmitter;
   settingsPanel: SettingsPanel | null = null;
+  /** cartelito con el nombre del mundo que se está viendo de fondo */
+  worldTag!: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -45,66 +29,59 @@ export default class MenuScene extends Phaser.Scene {
     fitCamera(this);
     const next = progress.nextLevelIndex();
     const nextLevel = LEVELS[next];
-    const theme = nextLevel.theme;
-    this.bg = new Background(this, theme);
 
-    const gy = H - MENU_MAP.length * TILE;
-    const grid = MENU_MAP.map((row) => row.split(''));
-    const tk = renderTerrain(this, `menu-terrain-${theme}`, grid, theme);
-    tintFill(this.add.image(3, gy + 4, tk), 0x1a1020).setOrigin(0).setAlpha(0.16).setDepth(4);
-    this.add.image(0, gy, tk).setOrigin(0).setDepth(5);
+    // Partida de fondo: empieza en el mundo de tu siguiente hoyo y luego va pasando por los demás
+    this.scene.stop('Demo');
+    this.scene.launch('Demo', { theme: nextLevel.theme });
+    const onDemoHole = (info: { worldName: string }) => this.showWorld(info.worldName);
+    this.game.events.on('demo-hole', onDemoHole);
 
-    // nubes y decoración
-    const P = THEMES[theme];
-    this.clouds = [[30, 40, 0], [180, 150, 2], [90, 300, 1], [210, 330, 0]].map(([x, y, k]) =>
-      Object.assign(this.add.image(x, y, `cloud${k}`).setTint(P.cloudTint ?? 0xffffff).setAlpha(P.cloudAlpha ?? 0.75).setDepth(-50), { vx: 3 + k }),
-    );
-    const top = (row: number) => gy + row * TILE + 1;
-    this.add.sprite(10, top(2), 'tuft').setOrigin(0.5, 1).setDepth(6).play('tuft-sway');
-    this.add.sprite(84, top(3), 'flower0').setOrigin(0.5, 1).setDepth(6).play('flower0-sway');
-    this.add.sprite(140, top(2), 'flower1').setOrigin(0.5, 1).setDepth(6).play({ key: 'flower1-sway', delay: 400 });
-    this.add.sprite(118, top(3), 'tuft').setOrigin(0.5, 1).setDepth(6).play({ key: 'tuft-sway', startFrame: 1 });
-    this.add.image(232, top(1), 'rock').setOrigin(0.5, 1).setDepth(6);
+    // degradados arriba y abajo: el logo y los botones se leen sobre cualquier fondo
+    // (con Graphics y no con una textura escalada: el borde de una textura estirada dejaba una línea fina visible)
+    const INK = 0x0e122c;
+    this.add.graphics().setDepth(-5)
+      .fillGradientStyle(INK, INK, INK, INK, 0.78, 0.78, 0, 0).fillRect(0, 0, W, 178)
+      .fillGradientStyle(INK, INK, INK, INK, 0, 0, 0.8, 0.8).fillRect(0, H - 150, W, 150);
 
-    // hoyo en la meseta derecha
-    const hx = 210;
-    const hy = gy + TILE;
-    this.add.image(hx, hy + 1, 'cup').setDepth(6);
-    this.add.image(hx, hy + 1, 'pole').setOrigin(0.5, 1).setDepth(7);
-    this.add.sprite(hx + 2, hy - 28, 'flag', 0).setOrigin(0, 0).setDepth(7).play('flag-wave');
-
-    this.ballY = gy + 3 * TILE - 5;
-    this.ball = this.add.sprite(90, this.ballY, `ball-${progress.skin}`, 0).setDepth(10);
-    this.trail = this.add.graphics().setDepth(9);
-    this.trailPts = [];
-    this.dust = this.add.particles(0, 0, 'px', {
-      lifespan: 400, speed: { min: 15, max: 50 }, angle: { min: 200, max: 340 }, gravityY: 100, alpha: { start: 1, end: 0 },
-      tint: 0xb4f282, emitting: false,
-    }).setDepth(11);
-    this.time.delayedCall(500, () => this.hop());
-
-    // Logo
-    const t1 = label(this, W / 2, 66, 'VERTICAL', 26, { strokeThickness: 5, shadowY: 3 });
-    const t2 = label(this, W / 2, 104, 'GOLF', 56, { strokeThickness: 7, shadowY: 4, stroke: '#2c5a35' });
+    // Logo, con un halo que respira y destellos
+    const glow = this.add.image(W / 2, 80, 'glow').setTint(0xb8ec6a).setBlendMode('ADD').setScale(3.4, 1.7).setAlpha(0.28);
+    this.tweens.add({ targets: glow, alpha: 0.14, scaleX: 3.9, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    const t1 = label(this, W / 2, 52, 'VERTICAL', 26, { strokeThickness: 5, shadowY: 3 });
+    const t2 = label(this, W / 2, 90, 'GOLF', 56, { strokeThickness: 7, shadowY: 4, stroke: '#2c5a35' });
     gradientFill(t1, [[0.2, '#ffffff'], [0.9, '#ffe8c8']]);
     gradientFill(t2, [[0.15, '#e8ff9a'], [0.55, '#86d35a'], [0.95, '#3c9a46']]);
     this.tweens.add({ targets: [t1, t2], y: '-=3', duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    label(this, W / 2, 142, 'Golpea, rebota y sube hasta el hoyo', 10);
+    label(this, W / 2, 128, 'Golpea, rebota y sube hasta el hoyo', 10);
+    this.time.addEvent({
+      delay: 650,
+      loop: true,
+      callback: () => {
+        const s = this.add.image(Phaser.Math.Between(40, W - 40), Phaser.Math.Between(40, 112), 'star-px').setAlpha(0).setScale(0.4).setTint(0xfff6c8);
+        this.tweens.add({
+          targets: s, alpha: 1, scale: Phaser.Math.FloatBetween(1, 1.8), angle: 45, duration: 260, yoyo: true,
+          onComplete: () => s.destroy(),
+        });
+      },
+    });
+
+    // nombre del mundo que se ve de fondo
+    panel(this, W / 2, 281, 112, 15, 'hud9').setAlpha(0.8);
+    this.worldTag = label(this, W / 2, 281, '', 8, { color: PAL.sand, strokeThickness: 2 });
 
     // Botones
-    panel(this, W / 2, 244, 178, 146, 'panel9').setAlpha(0.94);
-    label(this, W / 2, 184, 'SIGUIENTE PARTIDA', 8, { color: '#f0dcc0', strokeThickness: 2 });
-    const play = makeButton(this, W / 2, 210, { color: 'green', w: 132, h: 34, text: 'JUGAR', size: 18, onClick: () => this.go('Game', { levelIndex: next }) });
+    panel(this, W / 2, 351, 206, 118, 'panel9').setAlpha(0.95);
+    label(this, W / 2, 302, 'SIGUIENTE PARTIDA', 8, { color: '#f0dcc0', strokeThickness: 2 });
+    const play = makeButton(this, W / 2, 326, { color: 'green', w: 144, h: 32, text: 'JUGAR', size: 18, onClick: () => this.go('Game', { levelIndex: next }) });
     this.tweens.add({ targets: play, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    panel(this, W / 2, 236, 160, 16, 'hud9').setAlpha(0.7);
-    label(this, W / 2, 236, `${nextLevel.worldName} · Hoyo ${nextLevel.number} · ${nextLevel.name}`, 8, { color: PAL.sand });
-    makeButton(this, W / 2, 267, { color: 'gold', w: 124, h: 26, text: 'MUNDOS', size: 13, onClick: () => this.go('Worlds') });
-    const shop = makeButton(this, W / 2, 297, { color: 'blue', w: 124, h: 26, text: '   TIENDA', size: 13, onClick: () => this.go('Shop', { back: 'Menu' }) });
-    shop.add(this.add.image(-34, -2, 'up-power'));
+    panel(this, W / 2, 350, 178, 15, 'field9');
+    label(this, W / 2, 350, `${nextLevel.worldName} · Hoyo ${nextLevel.number} · ${nextLevel.name}`, 8, { color: PAL.sand });
+    makeButton(this, W / 2 - 45, 378, { color: 'gold', w: 86, h: 26, text: 'MUNDOS', size: 12, onClick: () => this.go('Worlds') });
+    const shop = makeButton(this, W / 2 + 45, 378, { color: 'blue', w: 86, h: 26, text: '   TIENDA', size: 12, onClick: () => this.go('Shop', { back: 'Menu' }) });
+    shop.add(this.add.image(-28, -2, 'up-power'));
     // aviso si hay alguna mejora o bola que ya puedes comprar
     const canBuy = UPGRADES.some((u) => (progress.nextCost(u.id) ?? Infinity) <= progress.coins) || progress.canPull();
     if (canBuy) {
-      const badge = label(this, W / 2 + 67, 286, '!', 10, { color: '#ffffff', stroke: '#ef4d5e', strokeThickness: 4 });
+      const badge = label(this, W / 2 + 85, 367, '!', 10, { color: '#ffffff', stroke: '#ef4d5e', strokeThickness: 4 });
       this.tweens.add({ targets: badge, scale: 1.3, duration: 400, yoyo: true, repeat: -1 });
     }
 
@@ -132,12 +109,16 @@ export default class MenuScene extends Phaser.Scene {
     if (progress.devMode) label(this, W - 38, 14, 'DEV', 8, { color: PAL.orange, weight: '700', strokeThickness: 2 });
 
     this.resetPanel = null;
-    // estilo de imagen elegido en los ajustes (se ve al momento en el menú)
+    // estilo de imagen elegido en los ajustes (se ve al momento en el menú; la partida de fondo lo aplica ella misma)
     applyLook(this.cameras.main);
     const offLook = progress.onSettingsChange((key) => {
       if (key === 'look') applyLook(this.cameras.main);
     });
-    this.events.once('shutdown', () => offLook());
+    this.events.once('shutdown', () => {
+      offLook();
+      this.game.events.off('demo-hole', onDemoHole);
+      this.scene.stop('Demo');
+    });
     this.input.keyboard?.on('keydown-ESC', () => {
       if (this.resetPanel) this.closeReset();
       else this.settingsPanel?.close();
@@ -149,7 +130,16 @@ export default class MenuScene extends Phaser.Scene {
     music.setPaused(false);
 
     label(this, W / 2, H - 9, isSupabaseEnabled ? '● online' : '○ offline', 8, { color: '#f0dcc0', strokeThickness: 2 }).setDepth(20);
+    // versión del juego, abajo a la izquierda
+    label(this, 6, H - 9, `v${GAME_VERSION}`, 8, { color: '#f0dcc0', strokeThickness: 2, ox: 0 }).setDepth(20);
+  }
 
+  /** Cambia el cartelito del mundo que se ve de fondo (con un pequeño fundido) */
+  showWorld(name: string) {
+    if (!this.worldTag?.active) return;
+    this.tweens.killTweensOf(this.worldTag);
+    this.worldTag.setText(name.toUpperCase()).setAlpha(0);
+    this.tweens.add({ targets: this.worldTag, alpha: 1, duration: 500, delay: 300 });
   }
 
   /** Ventana de confirmación: borra todo el progreso y reinicia el menú */
@@ -185,49 +175,8 @@ export default class MenuScene extends Phaser.Scene {
     this.resetPanel = null;
   }
 
-  hop() {
-    if (!this.ball.active) return;
-    const fromX = this.ball.x;
-    const toX = fromX < 108 ? Phaser.Math.Between(115, 136) : Phaser.Math.Between(80, 100);
-    const h = Phaser.Math.Between(30, 90);
-    const y0 = this.ballY;
-    this.tweens.addCounter({
-      from: 0,
-      to: 1,
-      duration: 380 + h * 4,
-      onUpdate: (tw) => {
-        const t = tw.getValue() ?? 0;
-        this.ball.x = fromX + (toX - fromX) * t;
-        this.ball.y = y0 - 4 * h * t * (1 - t);
-        this.ball.setFrame(((Math.floor(this.ball.x / 3) % 4) + 4) % 4);
-      },
-      onComplete: () => {
-        this.dust.explode(6, this.ball.x, y0 + 5);
-        this.tweens.add({ targets: this.ball, scaleY: 0.75, scaleX: 1.25, duration: 60, yoyo: true });
-        this.time.delayedCall(Phaser.Math.Between(200, 500), () => this.hop());
-      },
-    });
-  }
-
   go(key: string, data?: object) {
     sfx.whoosh();
     transitionTo(this, () => this.scene.start(key, data));
-  }
-
-  update(_: number, delta: number) {
-    this.bg.update(delta / 1000);
-    for (const c of this.clouds) {
-      c.x += c.vx * (delta / 1000);
-      if (c.x - c.width / 2 > W + 10) c.x = -c.width / 2 - 10;
-    }
-    const pts = this.trailPts;
-    if (this.ball.y < this.ballY - 2) pts.push({ x: this.ball.x, y: this.ball.y });
-    else pts.shift();
-    if (pts.length > 10) pts.shift();
-    const g = this.trail.clear();
-    for (let i = 1; i < pts.length; i++) {
-      const k = i / pts.length;
-      g.lineStyle(1 + k * 4, 0xffffff, k * 0.5).lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
-    }
   }
 }

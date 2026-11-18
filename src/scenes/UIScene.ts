@@ -48,6 +48,9 @@ export default class UIScene extends Phaser.Scene {
   brakeBtn?: Phaser.GameObjects.Container;
   brakeText?: Phaser.GameObjects.Text;
   brakeHint?: Phaser.GameObjects.Text;
+  mulliganBtn?: Phaser.GameObjects.Container;
+  mulliganText?: Phaser.GameObjects.Text;
+  mulliganHint?: Phaser.GameObjects.Text;
   barTop = 0;
   barBot = 0;
   barX = 0;
@@ -71,6 +74,7 @@ export default class UIScene extends Phaser.Scene {
     this.introCard = null;
     this.shieldIcon = undefined;
     this.brakeBtn = undefined;
+    this.mulliganBtn = undefined;
   }
 
   create() {
@@ -113,6 +117,7 @@ export default class UIScene extends Phaser.Scene {
     this.bus.on('complete', this.showComplete, this);
     this.bus.on('brake', this.onBrake, this);
     this.bus.on('shield', this.onShield, this);
+    this.bus.on('mulligan', this.onMulligan, this);
 
     this.setupKeys();
     // Si cambias de pestaña o bloqueas el móvil, el juego queda en pausa
@@ -217,12 +222,34 @@ export default class UIScene extends Phaser.Scene {
       this.brakeBtn = c;
       this.brakeHint = label(this, W - 30, H - 48, 'FRENO', 7, { color: '#ffc59a', strokeThickness: 2 });
     }
+    // Segunda oportunidad: deshace el último golpe (también tecla Z); va a la izquierda del freno si lo hay
+    if (I.mulligans > 0) {
+      const x = I.brakes > 0 ? W - 70 : W - 30;
+      const c = this.add.container(x, H - 26);
+      const bg = this.add.nineslice(0, 0, 'btn9-purple', 0, 34, 30, 5, 5, 5, 7);
+      const ic = this.add.image(0, -3, 'up-mulligan');
+      this.mulliganText = label(this, 10, 6, `${I.mulligans}`, 10, { strokeThickness: 2 });
+      c.add([bg, ic, this.mulliganText]);
+      c.setSize(34, 30).setInteractive({ useHandCursor: true });
+      c.on('pointerdown', (p: Phaser.Input.Pointer, lx: number, ly: number, e?: Phaser.Types.Input.EventData) => {
+        stopEvent(p, lx, ly, e);
+        this.gs.useMulligan();
+      });
+      this.mulliganBtn = c;
+      this.mulliganHint = label(this, x, H - 48, 'DESHACER', 7, { color: '#cfc4ff', strokeThickness: 2 });
+    }
   }
 
   onBrake(n: number) {
     if (!this.brakeBtn) return;
     this.brakeText?.setText(String(n));
     this.tweens.add({ targets: this.brakeBtn, scale: { from: 1.25, to: 1 }, duration: 200, ease: 'Back.easeOut' });
+  }
+
+  onMulligan(n: number) {
+    if (!this.mulliganBtn) return;
+    this.mulliganText?.setText(String(n));
+    this.tweens.add({ targets: this.mulliganBtn, scale: { from: 1.25, to: 1 }, duration: 200, ease: 'Back.easeOut' });
   }
 
   onShield(n: number) {
@@ -233,6 +260,11 @@ export default class UIScene extends Phaser.Scene {
   }
 
   update() {
+    if (this.mulliganBtn) {
+      const ok = this.gs.canMulligan();
+      this.mulliganBtn.setAlpha(ok ? 1 : this.gs.mulligans > 0 ? 0.45 : 0.2);
+      this.mulliganHint?.setAlpha(ok ? 1 : 0);
+    }
     if (this.brakeBtn) {
       const ok = this.gs.canBrake();
       this.brakeBtn.setAlpha(ok ? 1 : this.gs.brakes > 0 ? 0.45 : 0.2);

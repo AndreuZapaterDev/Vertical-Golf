@@ -60,24 +60,36 @@ export function gradientFill(text: Phaser.GameObjects.Text, stops: [number, stri
 
 /** Panel con marco pixel (NineSlice) */
 export function panel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, key = 'panel9') {
-  const slice = key === 'hud9' ? 3 : 4;
+  const slice = key === 'hud9' || key === 'field9' ? 3 : 5;
   return scene.add.nineslice(x, y, key, 0, w, h, slice, slice, slice, slice);
 }
 
-function pressable(scene: Phaser.Scene, target: Phaser.GameObjects.Container, onClick?: () => void) {
+/** Estado visual de un botón: reposo, ratón encima o pulsado (cada uno tiene su textura, ver gfx/textures.ts → button9) */
+type BtnState = 'up' | 'hover' | 'down';
+
+function pressable(scene: Phaser.Scene, target: Phaser.GameObjects.Container, onClick?: () => void, setState?: (s: BtnState) => void) {
   const y0 = target.y;
-  target.on('pointerover', () => scene.tweens.add({ targets: target, scale: 1.05, duration: 90 }));
+  let over = false;
+  target.on('pointerover', () => {
+    over = true;
+    setState?.('hover');
+    scene.tweens.add({ targets: target, scale: 1.05, duration: 90 });
+  });
   target.on('pointerout', () => {
+    over = false;
+    setState?.('up');
     scene.tweens.add({ targets: target, scale: 1, duration: 90 });
     target.y = y0;
   });
   target.on('pointerdown', (_p: Phaser.Input.Pointer, _x: number, _y: number, e?: Phaser.Types.Input.EventData) => {
     e?.stopPropagation?.(); // que el toque no llegue a la escena de juego (no empieza a apuntar)
     sfx.unlock();
+    setState?.('down');
     target.y = y0 + 1;
   });
   target.on('pointerup', () => {
     target.y = y0;
+    setState?.(over ? 'hover' : 'up');
     sfx.click();
     onClick?.();
   });
@@ -100,7 +112,11 @@ export function makeButton(scene: Phaser.Scene, x: number, y: number, { color = 
   c.add([bg, t]);
   c.setSize(w, h);
   c.setInteractive({ useHandCursor: true });
-  pressable(scene, c, onClick);
+  // pulsado: la cara baja (el labio se aplasta) y el texto con ella
+  pressable(scene, c, onClick, (s) => {
+    bg.setTexture(s === 'up' ? `btn9-${color}` : `btn9-${color}-${s}`);
+    t.y = s === 'down' ? 0 : -2;
+  });
   return c;
 }
 
@@ -113,6 +129,9 @@ export function iconButton(scene: Phaser.Scene, x: number, y: number, icon: stri
   // zona táctil más grande que el dibujo (en el móvil el botón mide ~28 px)
   c.setSize(26, 26);
   c.setInteractive({ useHandCursor: true });
-  pressable(scene, c, onClick);
+  pressable(scene, c, onClick, (s) => {
+    bg.setTexture(s === 'up' ? 'btn9-white' : `btn9-white-${s}`);
+    img.y = s === 'down' ? 1 : -1;
+  });
   return c;
 }
