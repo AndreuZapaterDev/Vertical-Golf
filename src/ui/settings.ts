@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { W, H, PAL, hex } from '../constants';
-import { progress, type Settings } from '../systems/progress';
+import { progress, LOOK_IDS, type Settings } from '../systems/progress';
+import { LOOKS } from './looks';
 import { sfx, haptic } from '../systems/audio';
 import { label, makeButton, panel, stopEvent } from './widgets';
 
@@ -8,17 +9,32 @@ const STEPS = 5; // el volumen va de 0 a 100 % en saltos de 20 %
 
 export type SettingsPanel = Phaser.GameObjects.Container & { close: () => void; closing: boolean };
 
+/** Opciones solo del menú principal: modo DEV y borrar la partida */
+export interface SettingsExtras {
+  /** se llama después de activar o desactivar el modo DEV (el menú se recarga para reflejarlo) */
+  onDevChange: () => void;
+  /** pide borrar la partida (el menú muestra su propia confirmación) */
+  onReset: () => void;
+}
+
 /**
  * Ventana de ajustes (música, efectos, vibración y temblor de cámara).
- * Se usa desde el menú principal y desde la pausa. Devuelve el contenedor con .close().
+ * Se usa desde el menú principal y desde la pausa. Con `extras` (solo en el menú) añade el modo DEV y el botón de borrar la partida.
+ * Devuelve el contenedor con .close().
  */
-export function openSettings(scene: Phaser.Scene, { onClose, depth = 80 }: { onClose?: () => void; depth?: number } = {}): SettingsPanel {
+export function openSettings(
+  scene: Phaser.Scene,
+  { onClose, depth = 80, extras }: { onClose?: () => void; depth?: number; extras?: SettingsExtras } = {},
+): SettingsPanel {
+  const dy = extras ? 34 : 0; // con las opciones extra, la ventana es más alta
+  const sh = 14 + dy; // desplazamiento de las filas hacia arriba (la ventana crece por abajo y por arriba)
+  const lookY = 68 - sh;
   const c = Object.assign(scene.add.container(W / 2, H / 2).setDepth(depth), { close: () => {}, closing: false });
   const blocker = scene.add.rectangle(0, 0, W, H, hex('#35282c'), 0.6).setInteractive();
   blocker.on('pointerdown', stopEvent);
   c.add(blocker);
-  c.add(panel(scene, 0, 0, 204, 200));
-  c.add(label(scene, 0, -80, 'AJUSTES', 18, { weight: '700', color: PAL.sand, strokeThickness: 3 }));
+  c.add(panel(scene, 0, 0, 204, 228 + dy * 2));
+  c.add(label(scene, 0, -80 - sh, 'AJUSTES', 18, { weight: '700', color: PAL.sand, strokeThickness: 3 }));
 
   const rowLabel = (y: number, text: string) => c.add(label(scene, -88, y, text, 11, { ox: 0, strokeThickness: 2 }));
 
@@ -66,10 +82,48 @@ export function openSettings(scene: Phaser.Scene, { onClose, depth = 80 }: { onC
     draw();
   };
 
-  volumeRow(-46, 'music', 'Música');
-  volumeRow(-18, 'sfx', 'Efectos');
-  toggleRow(12, 'vibration', 'Vibración', () => haptic(40));
-  toggleRow(40, 'shake', 'Temblor', () => scene.cameras.main.shake(120, 0.006));
+  // --- estilo de imagen: [<] Normal [>]
+  const lookRow = (y: number) => {
+    rowLabel(y, 'Imagen');
+    const name = label(scene, 49, y, '', 9, { strokeThickness: 2 });
+    const draw = () => name.setText(LOOKS[progress.settings.look].name);
+    const step = (d: number) => {
+      const i = LOOK_IDS.indexOf(progress.settings.look);
+      progress.setSetting('look', LOOK_IDS[(i + d + LOOK_IDS.length) % LOOK_IDS.length]);
+      draw();
+      sfx.click();
+    };
+    c.add(makeButton(scene, 14, y, { color: 'white', w: 18, h: 18, text: '<', size: 12, onClick: () => step(-1) }));
+    c.add(makeButton(scene, 84, y, { color: 'white', w: 18, h: 18, text: '>', size: 12, onClick: () => step(1) }));
+    c.add(name);
+    draw();
+  };
+
+  volumeRow(-46 - sh, 'music', 'Música');
+  volumeRow(-18 - sh, 'sfx', 'Efectos');
+  toggleRow(12 - sh, 'vibration', 'Vibración', () => haptic(40));
+  toggleRow(40 - sh, 'shake', 'Temblor', () => scene.cameras.main.shake(120, 0.006));
+  lookRow(lookY);
+
+  if (extras) {
+    c.add(scene.add.rectangle(0, lookY + 24, 176, 1, 0xc8bfb4, 0.5));
+    // Modo DEV: todo desbloqueado (mundos, hoyos, bolas, skins, rastros y mejoras al máximo)
+    rowLabel(lookY + 44, 'Modo DEV');
+    const dev = makeButton(scene, 50, lookY + 44, { color: 'gray', w: 58, h: 20, text: '', size: 11, onClick: () => {
+      progress.setDevMode(!progress.devMode);
+      drawDev();
+      extras.onDevChange();
+    } });
+    const drawDev = () => {
+      const on = progress.devMode;
+      (dev.list[0] as Phaser.GameObjects.NineSlice).setTexture(on ? 'btn9-orange' : 'btn9-gray');
+      (dev.list[1] as Phaser.GameObjects.Text).setText(on ? 'ON' : 'OFF');
+    };
+    c.add(dev);
+    drawDev();
+    // Borrar la partida y empezar de cero
+    c.add(makeButton(scene, 0, lookY + 72, { color: 'orange', w: 132, h: 22, text: 'BORRAR PARTIDA', size: 10, onClick: () => extras.onReset() }));
+  }
 
   const close = () => {
     if (!c.active || c.closing) return;
@@ -78,7 +132,7 @@ export function openSettings(scene: Phaser.Scene, { onClose, depth = 80 }: { onC
     onClose?.();
   };
   c.close = close;
-  c.add(makeButton(scene, 0, 78, { color: 'blue', w: 96, h: 26, text: 'Listo', size: 13, onClick: close }));
+  c.add(makeButton(scene, 0, lookY + (extras ? 104 : 38), { color: 'blue', w: 96, h: 26, text: 'Listo', size: 13, onClick: close }));
 
   c.setAlpha(0);
   scene.tweens.add({ targets: c, alpha: 1, duration: 150 });

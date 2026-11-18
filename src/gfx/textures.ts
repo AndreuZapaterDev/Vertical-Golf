@@ -370,6 +370,808 @@ export function generateTextures(scene: Phaser.Scene) {
     });
   });
   make(scene, 'rock', 8, 5, (c) => bitmap(c, 0, 0, ['..oooo..', '.ohhbbo.', 'ohbbbbso', 'obbbbsso', '.oooooo.'], { o: '#35282c', h: '#f0dfc6', b: '#b09c88', s: '#6e5a58' }));
+  // --- Playa: palmera, concha, estrella de mar, mata de duna, cangrejo y mar
+  make(scene, 'palm', 28, 36, (c) => {
+    const cx = 14;
+    const cy = 10;
+    const leaf = new Map<string, number>(); // 1 = parte alta de la hoja, 2 = parte baja
+    const mark = (x: number, y: number, v: number) => {
+      if (x >= 0 && y >= 0 && x < 28 && y < 36) leaf.set(`${x},${y}`, v);
+    };
+    [-168, -140, -105, -75, -40, -12, 8, 180].forEach((deg) => {
+      const a = (deg * Math.PI) / 180;
+      const L = Math.abs(Math.cos(a)) > 0.6 ? 12 : 9;
+      for (let t = 0; t <= 1; t += 0.02) {
+        const x = cx + Math.cos(a) * L * t;
+        const y = cy + Math.sin(a) * L * t * 0.7 + 8 * t * t * Math.abs(Math.cos(a));
+        const th = 1.5 * (1 - t) + 0.7;
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = -2; dy <= 2; dy++) {
+            if (Math.hypot(dx, dy) <= th) mark(Math.round(x + dx), Math.round(y + dy), dy < 0 || t < 0.3 ? 1 : 2);
+          }
+        }
+      }
+    });
+    mask(c, 28, 36, (x, y) => {
+      const l = leaf.get(`${x},${y}`);
+      if (l) return l === 1 ? '#5ed06a' : '#2f9a4e';
+      if (y >= cy + 1) {
+        const tx = 13 + Math.round((y - cy) * 0.1);
+        if (x >= tx && x <= tx + 1) return y % 4 === 0 ? '#6e4528' : x === tx ? '#c08a52' : '#8a5a34';
+      }
+      if ((x === 12 || x === 15) && y === cy + 2) return '#6e4528'; // cocos
+      return null;
+    }, '#3a5a2e');
+  });
+  make(scene, 'shell', 7, 4, (c) => bitmap(c, 0, 0, ['..ooo..', '.ophpo.', 'oppphpo', '.ooooo.'], { o: '#8a5a52', p: '#ffb8c8', h: '#fff0f4' }));
+  make(scene, 'starfish', 8, 7, (c) =>
+    bitmap(c, 0, 0, ['...oo...', '..oaao..', 'ooaaaaoo', '.oaahao.', '..oaao..', '.oao.oao', 'oo....oo'], { o: '#b8452e', a: '#ff9a62', h: '#ffd0a8' }));
+  makeFrames(scene, 'dune-tuft', 8, 7, 2, (c, f) => {
+    bitmap(c, 0, 0, f
+      ? ['..o..o..', '.og.ogo.', '.ogoghgo', 'oggghggo', 'ogggggo.', '.ogggo..', '........']
+      : ['.o..o...', 'ogo.og..', 'ogoghgo.', 'oggghggo', 'ogggggo.', '..oggo..', '........'],
+    { o: '#6a6a30', g: '#c9c460', h: '#f0e8a0' });
+  });
+  makeFrames(scene, 'crab', 14, 9, 2, (c, f) => {
+    bitmap(c, 0, 0, [
+      'oo..o....o..oo',
+      'oro.o....o.oro',
+      '.oooooooooooo.',
+      '.orrrrrrrrrro.',
+      '..orrhrrhrro..',
+      '..orrrrrrrro..',
+      f ? '..ooooooooo...' : '.o.oooooooo.o.',
+      f ? '.o.o.o..o.o.o.' : 'o..o.o..o.o..o',
+      '..............',
+    ].map((r) => r.slice(0, 14).padEnd(14, '.')), { o: '#6e2a24', r: '#ff6a4a', h: '#ffd0c0' });
+  });
+  // Playa: flotador hinchable (sustituye a la seta) y coral (sustituye al bumper)
+  make(scene, 'float', 12, 7, (c) =>
+    bitmap(c, 0, 0, [
+      '...oooooo...',
+      '..orrwwrro..',
+      '.orwwrrwwro.',
+      'orwwroorwwro',
+      '.orrwwwwrro.',
+      '..oooooooo..',
+      '............',
+    ], { o: '#8a2a2a', r: '#ff5a4a', w: '#ffffff' }));
+  for (const [key, ring, core] of [['coral', '#ff6f91', '#ffe4ec'], ['coral-lit', '#ffb3c6', '#ffffff']] as const) {
+    make(scene, key, 17, 17, (c) =>
+      mask(c, 17, 17, (x, y) => {
+        const dx = x + 0.5 - 8.5;
+        const dy = y + 0.5 - 8.5;
+        const r = Math.hypot(dx, dy);
+        if (r > 7.6) return null;
+        if (r > 5.4) return dx + dy < -3 ? '#ffd0dc' : (x * 7 + y * 3) % 5 === 0 ? '#e24a73' : ring;
+        if (r > 3.2) return (x + y) % 3 === 0 ? '#e24a73' : '#ffd36b';
+        return core;
+      }, '#7a2a4a'));
+  }
+  // --- Pantano: ciprés con musgo, juncos, nenúfares, rana, seta luminosa, esporas, fango y niebla
+  make(scene, 'cypress', 26, 38, (c) => {
+    mask(c, 26, 38, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      // tronco acampanado en la base
+      const tw = 2.2 + Math.max(0, (y - 26)) * 0.35;
+      if (y >= 14 && Math.abs(cx - 13) <= tw) return x < 13 ? '#6a4c30' : '#4a3422';
+      // copa en varias masas
+      const blobs: [number, number, number][] = [[13, 9, 8], [7, 13, 5], [19, 13, 5], [13, 15, 6], [10, 5, 4], [16, 5, 4]];
+      const hit = blobs.some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r);
+      if (hit) return cy < 8 && cx < 13 ? '#4f8a3a' : cy > 14 ? '#2c5a2c' : '#3b7234';
+      // musgo que cuelga
+      if (y >= 15 && y < 27 && [5, 8, 11, 15, 18, 21].includes(x) && y < 17 + ((x * 7) % 9)) return y % 3 === 0 ? '#9bc46a' : '#6f9a4a';
+      return null;
+    }, '#14301c');
+  });
+  makeFrames(scene, 'reed', 7, 14, 2, (c, f) => {
+    const o = f ? 1 : 0;
+    rect(c, 3 + o, 5, 1, 9, '#4c7430');
+    rect(c, 2, 7, 1, 7, '#3b5c26');
+    rect(c, 5, 9, 1, 5, '#3b5c26');
+    rect(c, 2 + o, 1, 3, 5, '#6a4426');
+    rect(c, 3 + o, 0, 1, 1, '#6a4426');
+    rect(c, 2 + o, 2, 1, 2, '#8a5a34');
+    px(c, 5 + o, 6, '#8aa85a');
+  });
+  make(scene, 'lilypad', 10, 4, (c) => {
+    bitmap(c, 0, 0, ['.oooooo...', 'ogggggggo.', '.oggghggo.', '..oooooo..'], { o: '#1f4a24', g: '#4aa04a', h: '#8fd46a' });
+    px(c, 6, 0, '#ff9ac8'); px(c, 7, 0, '#ffd0e4');
+  });
+  // nenúfar que se hunde: sustituye a los bloques frágiles en el pantano (un parche de nenúfares por casilla)
+  make(scene, 'lilyblock', 12, 12, (c) => {
+    rect(c, 0, 0, 12, 7, '#3f8a3f');
+    rect(c, 0, 0, 12, 1, '#9bd46a');
+    rect(c, 0, 6, 12, 1, '#1f4a24');
+    rect(c, 5, 1, 2, 3, '#1f4a24');
+    for (const [x, y] of [[2, 3], [8, 4], [10, 2]]) px(c, x, y, '#2c6a2c');
+    px(c, 3, 1, '#ff9ac8'); px(c, 4, 1, '#ffd0e4');
+    rect(c, 0, 7, 12, 2, '#244f2c');
+  });
+  makeFrames(scene, 'frog', 12, 10, 2, (c, f) => {
+    bitmap(c, 0, f ? 0 : 1, [
+      '.oo......oo.',
+      'owwo....owwo',
+      'owko.oo.okwo',
+      '.oggggggggo.',
+      'oggghgghgggo',
+      'ogggggggggo.',
+      f ? 'oo.oggggo.oo' : '.ogoggggogo.',
+      f ? 'o...o..o...o' : 'oo.oo..oo.oo',
+    ].map((r) => r.slice(0, 12).padEnd(12, '.')), { o: '#1f4a24', g: '#5fc04a', h: '#b8ee80', w: '#ffffff', k: '#101810' });
+  });
+  make(scene, 'glowcap', 12, 7, (c) =>
+    bitmap(c, 0, 0, [
+      '..oooooooo..',
+      '.ocwcccbbco.',
+      'ocwwccccbbco',
+      'occccwcccbco',
+      'oddddddddddo',
+      '.ossssssssso.',
+      '..oooooooo..',
+    ], { o: '#0f3a3a', c: '#3fe0c0', w: '#ffffff', b: '#1fa890', d: '#0f6a62', s: '#b8f0e0' }));
+  for (const [key, ring, core] of [['spore', '#9a6ad0', '#e6d0ff'], ['spore-lit', '#d0a8ff', '#ffffff']] as const) {
+    make(scene, key, 17, 17, (c) =>
+      mask(c, 17, 17, (x, y) => {
+        const dx = x + 0.5 - 8.5;
+        const dy = y + 0.5 - 8.5;
+        const r = Math.hypot(dx, dy);
+        if (r > 7.6) return null;
+        if (r > 5.4) return dx + dy < -3 ? '#e6d0ff' : (x * 5 + y * 7) % 6 === 0 ? '#6a3aa0' : ring;
+        if (r > 3.2) return (x + y) % 3 === 0 ? '#6a3aa0' : '#7fe0b0';
+        return core;
+      }, '#2a1a4a'));
+  }
+  // fango del fondo (se repite en horizontal bajo las islas, como el mar de la Playa)
+  make(scene, 'bog', 48, 40, (c) => {
+    for (let x = 0; x < 48; x++) {
+      const wy = 1 + Math.round(Math.sin((x / 48) * Math.PI * 3));
+      rect(c, x, wy, 1, 40 - wy, '#3a6a4c');
+      rect(c, x, 14, 1, 26, '#2c5a3e');
+      rect(c, x, 28, 1, 12, '#1f4a30');
+      px(c, x, wy, '#8ac88a');
+    }
+    for (const [x, y] of [[4, 3], [13, 2], [24, 3], [33, 2], [41, 3]]) rect(c, x, y, 3, 1, '#8fd454'); // lentejas de agua
+    for (const [x, y] of [[8, 9], [28, 11], [38, 8]]) { px(c, x, y, '#9ad69a'); px(c, x + 1, y - 1, '#9ad69a'); }
+  });
+  // niebla: velo con un claro redondo en el centro (se coloca sobre la bola)
+  make(scene, 'fog', 256, 256, (c) => {
+    const g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, 'rgba(120,150,130,0)');
+    g.addColorStop(0.16, 'rgba(120,150,130,0)');
+    g.addColorStop(0.34, 'rgba(120,150,130,0.9)');
+    g.addColorStop(1, 'rgba(120,150,130,0.9)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, 256, 256);
+  }, true);
+  // --- hitos del mapa de hoyos: molino (con aspas aparte, para girar), faro y velero
+  make(scene, 'windmill', 16, 24, (c) =>
+    mask(c, 16, 24, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 7) {
+        const half = (y + 1) * 0.95;
+        return Math.abs(cx - 8) <= half ? (x < 8 ? '#e84a4a' : '#b83030') : null;
+      }
+      const half = 3.4 + (y - 7) * 0.45;
+      if (Math.abs(cx - 8) > half) return null;
+      if (y >= 19 && Math.abs(cx - 8) < 1.6) return '#5a3a24';
+      if (y >= 11 && y <= 13 && Math.abs(cx - 8) < 1.1) return '#7fd0f0';
+      return x < 8 ? '#f0e0c0' : '#d8c4a0';
+    }, '#4a3322'));
+  make(scene, 'blades', 26, 26, (c) =>
+    mask(c, 26, 26, (x, y) => {
+      const dx = x + 0.5 - 13;
+      const dy = y + 0.5 - 13;
+      for (let r = 0; r < 4; r++) {
+        const u = r === 0 ? dx : r === 1 ? dy : r === 2 ? -dx : -dy;
+        const v = r === 0 ? dy : r === 1 ? -dx : r === 2 ? -dy : dx;
+        if (Math.abs(u) <= 1.1 && Math.abs(v) <= 12) return '#7a5030';
+        if (u >= 1.1 && u <= 4.8 && v >= 3.5 && v <= 11.5) return '#fff6e0';
+      }
+      return null;
+    }, '#4a3322'));
+  make(scene, 'lighthouse', 12, 32, (c) =>
+    mask(c, 12, 32, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 4) return Math.abs(cx - 6) <= 2.6 - (y < 1 ? 1.6 : 0) ? '#e84a4a' : null; // techo
+      if (y < 9) return Math.abs(cx - 6) <= 2.8 ? (y > 5 && y < 8 ? '#ffe070' : '#7a6a58') : null; // linterna
+      const half = 2.6 + (y - 9) * 0.16;
+      if (Math.abs(cx - 6) > half) return null;
+      return Math.floor((y - 9) / 4) % 2 ? '#e84a4a' : x < 6 ? '#ffffff' : '#d8dce8';
+    }, '#4a3322'));
+  make(scene, 'sailboat', 16, 16, (c) =>
+    mask(c, 16, 16, (x, y) => {
+      const cx = x + 0.5;
+      if (y >= 12 && y <= 14) return Math.abs(cx - 8) <= 6.5 - (y - 12) * 1.6 ? '#8a5a34' : null; // casco
+      if (y >= 2 && y < 12) {
+        const half = (y - 2) * 0.55;
+        if (cx > 8 && cx - 8 <= half) return '#ffffff';
+        if (cx < 8 && 8 - cx <= half * 0.55) return '#e8ecf4';
+      }
+      if (x === 8 && y >= 1 && y <= 12) return '#4a3322';
+      return null;
+    }, '#4a3322'));
+  // --- detalles del mapa de hoyos: cabaña, chiringuito de playa, cabaña sobre pilotes, muelle, barca, oveja y cartel de madera
+  make(scene, 'cabin', 20, 18, (c) =>
+    mask(c, 20, 18, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 8) {
+        const half = 2 + y * 1.15;
+        if (Math.abs(cx - 10) > half) return y >= 2 && y <= 5 && x >= 14 && x <= 16 ? '#8a8090' : null; // chimenea
+        return x < 10 ? '#c0603a' : '#9a4a2c';
+      }
+      if (Math.abs(cx - 10) > 8.2) return null;
+      if (y >= 11 && Math.abs(cx - 10) < 2) return '#5a3a24';
+      if (y >= 9 && y <= 11 && Math.abs(cx - 5.5) < 1.6) return '#7fd0f0';
+      return y % 3 === 0 ? '#b8905c' : '#d8b078';
+    }, '#4a3322'));
+  make(scene, 'beachhut', 20, 20, (c) =>
+    mask(c, 20, 20, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 9) {
+        const half = 1.5 + y * 1.1;
+        return Math.abs(cx - 10) <= half ? ((x + y) % 3 === 0 ? '#c0902c' : '#e0b84a') : null;
+      }
+      if (y >= 9 && y < 19 && (Math.abs(cx - 4) < 1 || Math.abs(cx - 16) < 1)) return '#7a5030';
+      if (y >= 14 && y <= 16 && cx > 6 && cx < 14) return x % 4 < 2 ? '#e84a4a' : '#ffffff'; // toalla
+      return null;
+    }, '#4a3322'));
+  make(scene, 'stilthut', 20, 26, (c) =>
+    mask(c, 20, 26, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 7) {
+        const half = 2 + y * 1.2;
+        return Math.abs(cx - 10) <= half ? (x < 10 ? '#4f7a3c' : '#3a5c2c') : null;
+      }
+      if (y < 15) {
+        if (Math.abs(cx - 10) > 7.2) return null;
+        if (y >= 9 && y <= 12 && Math.abs(cx - 10) < 1.8) return '#ffe070';
+        return y % 3 === 0 ? '#6a5034' : '#8a6a44';
+      }
+      if (y === 15) return Math.abs(cx - 10) <= 8.5 ? '#6a4626' : null;
+      return Math.abs(cx - 4) < 0.9 || Math.abs(cx - 16) < 0.9 ? '#4a3422' : null;
+    }, '#1f1a12'));
+  make(scene, 'pier', 28, 8, (c) => {
+    rect(c, 0, 2, 28, 3, '#b8864e');
+    rect(c, 0, 2, 28, 1, '#d8a868');
+    rect(c, 0, 4, 28, 1, '#8a5a34');
+    for (let x = 3; x < 28; x += 4) rect(c, x, 2, 1, 3, '#7a4c28');
+    for (const x of [2, 12, 22]) rect(c, x, 5, 2, 3, '#5a3a24');
+    rect(c, 0, 1, 28, 1, '#4a3322');
+    rect(c, 0, 5, 28, 1, '#4a3322');
+  });
+  make(scene, 'rowboat', 14, 8, (c) =>
+    mask(c, 14, 8, (x, y) => {
+      const cx = x + 0.5;
+      if (y >= 3 && y <= 6) return Math.abs(cx - 7) <= 6.2 - (y - 3) * 1.4 ? (y === 3 ? '#6a4626' : '#9a6a3c') : null;
+      if (y === 2 && (x === 4 || x === 9)) return '#4a3322';
+      if (x >= 2 && x <= 12 && y === 1 && (x === 3 || x === 11)) return '#7a5030';
+      return null;
+    }, '#4a3322'));
+  make(scene, 'sheep', 12, 10, (c) =>
+    mask(c, 12, 10, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (Math.hypot((cx - 6) / 4.8, (cy - 4.5) / 3.6) <= 1) return cy < 4 ? '#ffffff' : '#e4e8f0';
+      if (x >= 9 && x <= 11 && y >= 3 && y <= 6) return '#3a3340';
+      if ((x === 3 || x === 8) && y >= 8 && y <= 9) return '#3a3340';
+      return null;
+    }, '#3a3340'));
+  make(scene, 'signboard', 62, 22, (c) => {
+    rect(c, 9, 14, 3, 8, '#5a3a24');
+    rect(c, 50, 14, 3, 8, '#5a3a24');
+    rect(c, 3, 2, 56, 14, '#4a3322');
+    rect(c, 4, 3, 54, 12, '#c8905a');
+    rect(c, 4, 3, 54, 1, '#e0b078');
+    rect(c, 4, 14, 54, 1, '#9a6a3c');
+    for (const x of [6, 55]) px(c, x, 5, '#4a3322');
+  });
+  // --- emblemas y decorados de los mundos futuros (para el mapa de mundos)
+  make(scene, 'pyramid', 24, 20, (c) =>
+    mask(c, 24, 20, (x, y) => {
+      const cx = x + 0.5;
+      const half = 0.6 + y * 0.6;
+      if (Math.abs(cx - 12) > half) return null;
+      if (y >= 14 && Math.abs(cx - 12) < 1.6) return '#3a2410';
+      return cx < 12 ? (y % 4 === 3 ? '#d0aa60' : '#ecca7c') : (y % 4 === 3 ? '#a8803c' : '#c8a050');
+    }, '#6a4a2a'));
+  make(scene, 'cavearch', 22, 22, (c) =>
+    mask(c, 22, 22, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y < 6 || Math.hypot((cx - 11) / 10.5, (cy - 20) / 15) > 1) return null;
+      if (Math.hypot((cx - 11) / 4.4, (cy - 21) / 8.4) < 1) return '#080a10';
+      if ((x === 4 || x === 17) && y >= 8 && y <= 12) return '#7ae8e8';
+      return x < 11 ? '#7a7a8c' : '#5a5a6c';
+    }, '#0f1218'));
+  make(scene, 'icepeak', 24, 28, (c) =>
+    mask(c, 24, 28, (x, y) => {
+      const cx = x + 0.5;
+      const half = y * 0.42 + (y > 8 && y % 5 === 0 ? 1 : 0);
+      if (Math.abs(cx - 12) > half) return null;
+      if (y < 9) return cx < 12 ? '#ffffff' : '#e8f2ff';
+      return cx < 12 ? '#cfe6f8' : '#9cc4e4';
+    }, '#2a4a6a'));
+  make(scene, 'volcano', 26, 28, (c) =>
+    mask(c, 26, 28, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 4) return null;
+      const half = 3 + (y - 4) * 0.46;
+      if (Math.abs(cx - 13) > half) return null;
+      if (y >= 4 && y <= 6 && Math.abs(cx - 13) < half - 0.5) return y === 4 ? '#ffe070' : '#ff8a2a';
+      if (Math.abs(cx - 13) < 1 && y > 6 && y < 20) return '#ff7a2a';
+      return cx < 13 ? '#6a4a44' : '#3e2622';
+    }, '#120808'));
+  make(scene, 'tank', 20, 12, (c) =>
+    mask(c, 20, 12, (x, y) => {
+      const cx = x + 0.5;
+      if (y >= 8 && y <= 11 && cx > 1.5 && cx < 18.5) return y === 11 ? '#2a2a24' : '#3a3a30'; // orugas
+      if (y >= 5 && y <= 8 && cx > 3 && cx < 17) return '#6a7a4a';
+      if (y >= 2 && y <= 5 && cx > 7 && cx < 14) return '#7a8a56';
+      if (y >= 3 && y <= 4 && cx >= 14 && cx < 20) return '#4a5638';
+      return null;
+    }, '#1c2418'));
+  make(scene, 'cooltower', 18, 28, (c) =>
+    mask(c, 18, 28, (x, y) => {
+      const cx = x + 0.5;
+      const half = 4.8 + Math.abs(y - 13) * 0.2;
+      if (Math.abs(cx - 9) > half) return null;
+      if (y >= 2 && y <= 4) return y % 2 ? '#e84a4a' : '#ffffff';
+      return cx < 9 ? '#d0d4d8' : '#9ca0a8';
+    }, '#0e140a'));
+  make(scene, 'skyscraper', 14, 30, (c) =>
+    mask(c, 14, 30, (x, y) => {
+      if (x < 1 || x > 12) return null;
+      if (y === 0 && x !== 6 && x !== 7) return null;
+      if (y > 3 && y % 3 === 0 && x % 3 === 0) return (x * 7 + y * 3) % 5 === 0 ? '#ffe070' : '#2a3a5a';
+      return x < 7 ? '#6a7a9a' : '#4a5a7a';
+    }, '#141a28'));
+  make(scene, 'rocket', 10, 26, (c) =>
+    mask(c, 10, 26, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 5) return Math.abs(cx - 5) <= y * 0.9 + 0.4 ? '#e84a4a' : null;
+      if (y < 19) {
+        if (Math.abs(cx - 5) > 3) return null;
+        if (y >= 8 && y <= 10 && Math.abs(cx - 5) < 1.5) return '#7fd0f0';
+        return cx < 5 ? '#ffffff' : '#c4cad8';
+      }
+      if (y < 24) return Math.abs(cx - 5) <= 3 + (y - 19) * 0.5 && Math.abs(cx - 5) > 1.2 ? '#e84a4a' : Math.abs(cx - 5) <= 3 ? '#c4cad8' : null;
+      return Math.abs(cx - 5) < 1.5 ? '#ffb84a' : null;
+    }, '#05070f'));
+  make(scene, 'planet', 26, 22, (c) =>
+    mask(c, 26, 22, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      const dp = Math.hypot(cx - 13, cy - 11);
+      const ring = Math.abs(Math.hypot((cx - 13) / 12, (cy - 11) / 3.2) - 1);
+      const front = cy > 11;
+      if (ring < 0.22 && (front || dp > 7.2)) return ring < 0.1 ? '#f0d8ff' : '#b48ae0';
+      if (dp <= 7.2) return cx - 13 + (cy - 11) < -3 ? '#e0a0ff' : cx - 13 + (cy - 11) > 4 ? '#6a3a9a' : '#a060d0';
+      return null;
+    }, '#07030f'));
+  make(scene, 'cactus', 8, 14, (c) =>
+    mask(c, 8, 14, (x, y) => {
+      if (x >= 3 && x <= 4) return x === 3 ? '#4aa04a' : '#2f7a34';
+      if (x === 1 && y >= 4 && y <= 8) return '#4aa04a';
+      if (x === 2 && y === 8) return '#4aa04a';
+      if (x === 6 && y >= 2 && y <= 6) return '#2f7a34';
+      if (x === 5 && y === 6) return '#2f7a34';
+      return null;
+    }, '#1c4020'));
+  make(scene, 'pinesnow', 14, 22, (c) =>
+    mask(c, 14, 22, (x, y) => {
+      const cx = x + 0.5;
+      if (y >= 18) return Math.abs(cx - 7) <= 1 ? '#6a4a30' : null;
+      const tier = y % 6;
+      const half = 1 + (y / 18) * 5.6 + (tier < 2 ? 0 : 0.6);
+      if (Math.abs(cx - 7) > half) return null;
+      return tier < 2 ? '#ffffff' : cx < 7 ? '#3a8a60' : '#26664a';
+    }, '#143a2a'));
+  make(scene, 'crystal', 8, 12, (c) =>
+    mask(c, 8, 12, (x, y) => {
+      const cx = x + 0.5;
+      const half = y < 4 ? y * 0.9 : 3.6 - (y - 4) * 0.12;
+      if (Math.abs(cx - 4) > half) return null;
+      return cx < 4 ? '#b8fff0' : '#3fe0c0';
+    }, '#0f3a3a'));
+  make(scene, 'barrel', 8, 9, (c) =>
+    mask(c, 8, 9, (x, y) => {
+      if (y >= 3 && y <= 4) return (x + y) % 2 ? '#ffd030' : '#2a2a24';
+      return x < 4 ? '#7a8a50' : '#566638';
+    }, '#1c2418'));
+  make(scene, 'asteroid', 10, 8, (c) =>
+    mask(c, 10, 8, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (Math.hypot((cx - 5) / 4.6, (cy - 4) / (3.4 + (x % 3 === 0 ? 0.4 : 0))) > 1) return null;
+      return (x + y) % 5 === 0 ? '#5a5a70' : cx < 5 ? '#9a9ab0' : '#6a6a82';
+    }, '#05070f'));
+  // --- emblemas y decorados de las zonas futuras (2.ª tanda): selva, templo, fondo marino, industrial, neón, circo y caramelo
+  make(scene, 'jungletree', 24, 30, (c) =>
+    mask(c, 24, 30, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y >= 18 && Math.abs(cx - 12) <= 2.4) return x < 12 ? '#7a5a3a' : '#5a4228';
+      const blobs: [number, number, number][] = [[12, 9, 9], [6, 12, 6], [18, 12, 6], [12, 14, 7]];
+      if (blobs.some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r)) return cy < 8 && cx < 12 ? '#6fd058' : cy > 14 ? '#1f6a2a' : '#2f8a38';
+      if (y >= 15 && y < 27 && [4, 8, 16, 20].includes(x) && y < 17 + ((x * 5) % 8)) return y % 3 === 0 ? '#9ad870' : '#4aa040';
+      return null;
+    }, '#0e2412'));
+  make(scene, 'ruin', 18, 18, (c) =>
+    mask(c, 18, 18, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y < 4 + (x % 5 === 1 ? 3 : 0) + (x > 11 ? 3 : 0)) return null;
+      if (Math.hypot((cx - 9) / 3.2, (cy - 16) / 7) < 1) return '#101810';
+      if (y < 7 && (x + y) % 3 === 0) return '#4aa040';
+      return (x * 3 + y * 5) % 7 === 0 ? '#6a6a60' : x < 9 ? '#9a9a8c' : '#7a7a6e';
+    }, '#1a2418'));
+  make(scene, 'fern', 10, 8, (c) =>
+    mask(c, 10, 8, (x, y) => {
+      const cx = x + 0.5;
+      const half = 0.6 + y * 0.55;
+      if (Math.abs(cx - 5) > half) return null;
+      return (x + y) % 3 === 0 ? '#2f8a38' : '#4aa83a';
+    }, '#123a16'));
+  make(scene, 'temple', 28, 24, (c) =>
+    mask(c, 28, 24, (x, y) => {
+      const cx = x + 0.5;
+      const tier = y < 8 ? 0 : y < 15 ? 1 : 2;
+      const half = [5, 9, 13][tier];
+      if (Math.abs(cx - 14) > half) return null;
+      if (y >= 17 && Math.abs(cx - 14) < 2.4) return '#1a1008';
+      if (tier === 0 && y >= 2 && y <= 6 && Math.abs(cx - 14) < 1.6) return y === 2 ? '#ffe070' : '#2a1a10'; // antorcha / puerta
+      if ((x === 3 || x === 24) && y >= 14 && y <= 16) return '#ffd040'; // antorchas
+      return (y % 7 === 6) ? '#a8844c' : cx < 14 ? '#d8b88a' : '#b8946a';
+    }, '#4a3220'));
+  make(scene, 'column', 8, 18, (c) =>
+    mask(c, 8, 18, (x, y) => {
+      if (y < 3 + (x > 4 ? 3 : 0)) return null;
+      if (y >= 15 || y < 5) return x >= 0 && x <= 7 ? '#c8b088' : null;
+      return x >= 1 && x <= 6 ? (x < 4 ? '#e0cca0' : '#b8a074') : null;
+    }, '#4a3220'));
+  make(scene, 'shipwreck', 24, 18, (c) =>
+    mask(c, 24, 18, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y >= 9 && y <= 15) {
+        const half = 11 - (y - 9) * 0.9 - (cx > 12 ? (cx - 12) * 0.2 : 0);
+        if (Math.abs(cx - 11) <= half) return (x + y) % 4 === 0 ? '#4a3220' : '#6a4a2e';
+      }
+      if (x === 11 && y >= 1 && y <= 9) return '#4a3220';
+      if (cy >= 2 && cy <= 6 && cx > 11 && cx < 17 && cx - 11 <= 6 - Math.abs(cy - 4) * 1.4) return '#c8c0a8';
+      return null;
+    }, '#0a2448'));
+  make(scene, 'seaweed', 8, 16, (c) =>
+    mask(c, 8, 16, (x, y) => {
+      const sway = Math.round(Math.sin(y * 0.6) * 1.6);
+      return Math.abs(x - 3.5 - sway) < 0.9 ? (y % 3 === 0 ? '#3aa860' : '#1f7a44') : null;
+    }, '#0a3a28'));
+  make(scene, 'coralbig', 16, 14, (c) =>
+    mask(c, 16, 14, (x, y) => {
+      const cx = x + 0.5;
+      if (y >= 10 && Math.abs(cx - 8) < 4) return '#d84a7a';
+      for (const bx of [3.5, 8, 12.5]) {
+        const top = bx === 8 ? 1 : 4;
+        if (y >= top && y < 11 && Math.abs(cx - bx) < 1.4 + (y < top + 3 ? 0.8 : 0)) return (x + y) % 3 === 0 ? '#ff90b0' : '#ff5a8a';
+      }
+      return null;
+    }, '#5a1a38'));
+  make(scene, 'candycastle', 24, 24, (c) =>
+    mask(c, 24, 24, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 8) {
+        const half = 1 + y * 1.3;
+        return Math.abs(cx - 12) <= half ? ((x + y) % 4 < 2 ? '#ff9ac8' : '#ffffff') : null;
+      }
+      if (Math.abs(cx - 12) > 9) return null;
+      if (y >= 15 && Math.abs(cx - 12) < 2.2) return '#6a3a1c';
+      if (y >= 10 && y <= 12 && (Math.abs(cx - 6.5) < 1.2 || Math.abs(cx - 17.5) < 1.2)) return '#ffe070';
+      return (x + y) % 5 === 0 ? '#ffffff' : '#c88a58';
+    }, '#6a2a48'));
+  make(scene, 'lollipop', 12, 26, (c) =>
+    mask(c, 12, 26, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      const d = Math.hypot(cx - 6, cy - 6);
+      if (d <= 5.6) return (Math.atan2(cy - 6, cx - 6) + d * 0.9) % 1.6 < 0.8 ? '#ff5a9a' : '#ffffff';
+      if (y > 11 && Math.abs(cx - 6) < 0.9) return '#e8e0d0';
+      return null;
+    }, '#6a2a48'));
+  make(scene, 'candycane', 8, 16, (c) =>
+    mask(c, 8, 16, (x, y) => {
+      if (y < 4) return x >= 2 && x <= 6 && Math.hypot(x + 0.5 - 5, y + 0.5 - 4) <= 3 && Math.hypot(x + 0.5 - 5, y + 0.5 - 4) >= 1.4 ? (x + y) % 3 === 0 ? '#ffffff' : '#e8344a' : null;
+      return x >= 4 && x <= 5 ? ((y >> 1) % 2 ? '#ffffff' : '#e8344a') : null;
+    }, '#6a2a48'));
+  make(scene, 'gumdrop', 8, 8, (c) =>
+    mask(c, 8, 8, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y < 2 || Math.hypot((cx - 4) / 3.6, (cy - 6) / 4.6) > 1) return null;
+      return cx - 4 + (cy - 6) < -1.5 ? '#ffffff' : '#c8c8c8';
+    }, '#6a2a48'));
+  make(scene, 'neontower', 16, 30, (c) =>
+    mask(c, 16, 30, (x, y) => {
+      const cx = x + 0.5;
+      const half = 3 + y * 0.18;
+      if (Math.abs(cx - 8) > half) return null;
+      if (y % 5 === 0) return '#40f0ff';
+      if (Math.abs(cx - 8) > half - 1) return '#ff40c0';
+      return (x * 3 + y) % 7 === 0 ? '#3a1c66' : '#1a0c30';
+    }, '#05020f'));
+  make(scene, 'cube', 12, 12, (c) => {
+    const col = '#40f0ff';
+    const col2 = '#ff40c0';
+    for (let i = 0; i < 8; i++) {
+      px(c, 2 + i, 2, col); px(c, 2 + i, 9, col); px(c, 2, 2 + i, col); px(c, 9, 2 + i, col);
+      px(c, 4 + i, 0, col2); px(c, 4 + i, 7, col2); px(c, 4, i, col2); px(c, 11, i, col2);
+    }
+    for (let i = 0; i < 3; i++) { px(c, 2 + i, 2 - i, col2); px(c, 9 + i, 9 - i, col2); }
+  });
+  make(scene, 'pylon', 6, 18, (c) => {
+    rect(c, 2, 4, 2, 14, '#3a1c66');
+    rect(c, 2, 4, 1, 14, '#a040ff');
+    rect(c, 1, 0, 4, 4, '#40f0ff');
+    rect(c, 2, 1, 2, 2, '#ffffff');
+  });
+  make(scene, 'factory', 26, 24, (c) =>
+    mask(c, 26, 24, (x, y) => {
+      if (y < 10 && x >= 18 && x <= 22) return y % 4 === 0 ? '#e8344a' : '#8a5a48'; // chimenea
+      if (y < 8) return null;
+      if (x < 1 || x > 24) return null;
+      if (y < 12 && x % 6 < 3) return null; // dientes de sierra
+      if (y >= 14 && y <= 16 && x % 5 === 2) return '#ffd040';
+      if (y >= 19 && x >= 10 && x <= 14) return '#2a2a30';
+      return (x + y) % 6 === 0 ? '#6a6a74' : x < 13 ? '#9a8a7a' : '#7a6a5a';
+    }, '#16171c'));
+  make(scene, 'chimney', 8, 22, (c) =>
+    mask(c, 8, 22, (x, y) => {
+      const half = 2 + y * 0.07;
+      if (Math.abs(x + 0.5 - 4) > half) return null;
+      return y % 5 < 1 ? '#e8344a' : x < 4 ? '#a88a78' : '#8a6a58';
+    }, '#16171c'));
+  make(scene, 'gear', 12, 12, (c) =>
+    mask(c, 12, 12, (x, y) => {
+      const dx = x + 0.5 - 6;
+      const dy = y + 0.5 - 6;
+      const d = Math.hypot(dx, dy);
+      const a = Math.atan2(dy, dx);
+      const R = 5.4 + (Math.floor(((a + Math.PI) / (Math.PI * 2)) * 8) % 2 ? 0.6 : -0.2);
+      if (d > R) return null;
+      if (d < 1.8) return '#16171c';
+      return d > 4 ? '#c8c8d4' : '#8a8a98';
+    }, '#16171c'));
+  make(scene, 'crate', 8, 8, (c) => {
+    rect(c, 0, 0, 8, 8, '#16171c');
+    rect(c, 1, 1, 6, 6, '#b8864e');
+    rect(c, 1, 1, 6, 1, '#d8a868');
+    rect(c, 1, 3, 6, 1, '#8a5a34');
+    rect(c, 3, 1, 1, 6, '#8a5a34');
+  });
+  make(scene, 'bigtop', 28, 26, (c) =>
+    mask(c, 28, 26, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 3) return x === 14 || x === 15 ? '#ffd040' : null; // banderín
+      if (y < 12) {
+        const half = (y - 2) * 1.25;
+        if (Math.abs(cx - 14) > half) return null;
+        return Math.floor(cx / 3.5) % 2 ? '#ffffff' : '#e8344a';
+      }
+      if (Math.abs(cx - 14) > 12.5) return null;
+      if (y >= 17 && Math.abs(cx - 14) < 2.6) return '#3a0f20';
+      return Math.floor(cx / 3.5) % 2 ? '#fff0f0' : '#d82a40';
+    }, '#2a0f38'));
+  make(scene, 'ferris', 30, 30, (c) => {
+    const cx = 15;
+    const cy = 15;
+    for (let a = 0; a < 720; a++) {
+      const t = (a / 720) * Math.PI * 2;
+      px(c, Math.round(cx + Math.cos(t) * 13), Math.round(cy + Math.sin(t) * 13), '#fff0b0');
+    }
+    for (let k = 0; k < 8; k++) {
+      const t = (k / 8) * Math.PI * 2;
+      for (let r = 1; r < 13; r++) px(c, Math.round(cx + Math.cos(t) * r), Math.round(cy + Math.sin(t) * r), '#e8e0d0');
+      rect(c, Math.round(cx + Math.cos(t) * 13) - 1, Math.round(cy + Math.sin(t) * 13) - 1, 3, 3, ['#e8344a', '#40a0ff', '#ffd040', '#40e070'][k % 4]);
+    }
+    rect(c, 14, 14, 3, 3, '#ffd040');
+  });
+  make(scene, 'ferrisbase', 20, 16, (c) => {
+    for (let y = 0; y < 16; y++) {
+      px(c, 10 - Math.round(y * 0.55), y, '#e8e0d0');
+      px(c, 9 + Math.round(y * 0.55), y, '#e8e0d0');
+    }
+    rect(c, 0, 14, 20, 2, '#6a2a48');
+  });
+  make(scene, 'balloon', 8, 14, (c) =>
+    mask(c, 8, 14, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (Math.hypot((cx - 4) / 3.4, (cy - 4.5) / 4.2) <= 1) return cx - 4 + (cy - 4.5) < -1.6 ? '#ffffff' : '#d8d8d8';
+      if (x === 4 && y >= 9) return '#e8e0d0';
+      return null;
+    }, '#2a0f38'));
+  // --- 3.ª tanda de emblemas: mansión encantada, piratas y oeste
+  make(scene, 'mansion', 26, 28, (c) =>
+    mask(c, 26, 28, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 9) {
+        const half = 1 + y * 1.2;
+        if (Math.abs(cx - 13) <= half) return cx < 13 ? '#3a3050' : '#2a2240';
+        return x >= 20 && x <= 22 && y >= 2 && y < 7 ? '#2a2240' : null; // chimenea torcida
+      }
+      if (Math.abs(cx - 13) > 11) return null;
+      if (y >= 20 && Math.abs(cx - 13) < 2.4) return '#0c0a14';
+      if (y >= 12 && y <= 15 && ((Math.abs(cx - 7) < 1.6) || (Math.abs(cx - 19) < 1.6))) return (x + y) % 2 ? '#ffe070' : '#a89040';
+      return (x + y * 3) % 7 === 0 ? '#4a4258' : cx < 13 ? '#6a5e80' : '#52486a';
+    }, '#0c0a14'));
+  make(scene, 'tombstone', 8, 10, (c) =>
+    mask(c, 8, 10, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 2) return Math.abs(cx - 4) <= 1.5 + y * 0.8 ? '#a8a8b8' : null;
+      if (Math.abs(cx - 4) > 3) return null;
+      if (y >= 3 && y <= 6 && Math.abs(cx - 4) < 0.8) return '#5a5a6a';
+      return cx < 4 ? '#b8b8c8' : '#8a8a9a';
+    }, '#141420'));
+  make(scene, 'deadtree', 14, 24, (c) =>
+    mask(c, 14, 24, (x, y) => {
+      if (Math.abs(x + 0.5 - 7) <= 1.2 && y >= 6) return x < 7 ? '#4a4258' : '#2e2840';
+      const branches: [number, number, number][] = [[7, 6, 1], [4, 5, 0.5], [10, 4, 0.5], [3, 2, 0.4], [11, 1, 0.4]];
+      for (const [bx, by] of branches) if (Math.abs(x - bx) <= 0.8 && y >= by && y < by + 5 && (bx === 7 || Math.abs(y - by - 2) < 3)) return '#3a3350';
+      if (x >= 4 && x <= 6 && y === 7 - (x - 4)) return '#3a3350';
+      if (x >= 8 && x <= 10 && y === 5 + (x - 8)) return '#3a3350';
+      return null;
+    }, '#0c0a14'));
+  make(scene, 'ghost', 10, 12, (c) =>
+    mask(c, 10, 12, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 9) {
+        const half = Math.min(4.6, 1.8 + y * 0.7);
+        if (Math.abs(cx - 5) > half) return null;
+        if (y >= 3 && y <= 5 && (Math.abs(cx - 3.5) < 0.8 || Math.abs(cx - 6.5) < 0.8)) return '#1a1a28';
+        return '#f0f0ff';
+      }
+      if (Math.abs(cx - 5) > 4.6) return null;
+      return (x + y) % 2 === 0 ? '#f0f0ff' : y > 10 ? null : '#d0d0e8';
+    }, '#2a2a40'));
+  make(scene, 'pumpkin', 8, 7, (c) =>
+    mask(c, 8, 7, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y === 0) return x === 4 ? '#3a6a2a' : null;
+      if (Math.hypot((cx - 4) / 3.8, (cy - 4) / 3) > 1) return null;
+      if (y >= 3 && y <= 4 && (x === 2 || x === 5)) return '#2a1408';
+      return cx < 4 ? '#ff9a2a' : '#e07a14';
+    }, '#4a2408'));
+  make(scene, 'pirateship', 30, 26, (c) =>
+    mask(c, 30, 26, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (y >= 17 && y <= 23) {
+        const half = 13 - (y - 17) * 1.1;
+        if (Math.abs(cx - 15) <= half) return (x + y) % 4 === 0 ? '#4a2e1a' : '#6a4426';
+      }
+      for (const mx of [10, 20]) if (Math.abs(cx - mx) < 0.8 && y >= 2 && y <= 17) return '#3a2410';
+      for (const [mx, top, bot] of [[10, 4, 13], [20, 6, 14]] as const) {
+        if (cy >= top && cy <= bot && Math.abs(cx - mx) < 5 - (cy - top) * 0.25 && Math.abs(cx - mx) >= 0.8) return '#f4ecd8';
+      }
+      if (x === 20 && y >= 0 && y <= 2) return '#141414';
+      return null;
+    }, '#1a1008'));
+  make(scene, 'chest', 10, 8, (c) =>
+    mask(c, 10, 8, (x, y) => {
+      if (y < 3) return x >= 1 && x <= 8 && !(y === 0 && (x === 1 || x === 8)) ? '#8a5a34' : null;
+      if (x < 0 || x > 9) return null;
+      if (y === 3) return '#ffd040';
+      return x === 4 || x === 5 ? '#ffd040' : '#6a4426';
+    }, '#2a1a10'));
+  make(scene, 'cannon', 14, 9, (c) =>
+    mask(c, 14, 9, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (Math.hypot(cx - 4, cy - 6.5) <= 2.4) return '#6a4426'; // rueda
+      if (cy >= 2 + (13 - cx) * 0.12 && cy <= 5 + (13 - cx) * 0.12 && cx >= 3 && cx <= 13) return cx < 4 ? '#8a8a96' : '#3a3a44';
+      return null;
+    }, '#141418'));
+  make(scene, 'saloon', 26, 22, (c) =>
+    mask(c, 26, 22, (x, y) => {
+      const cx = x + 0.5;
+      if (y < 3) return cx > 4 && cx < 22 ? '#6a4426' : null;
+      if (y < 5 && y >= 3) return cx > 2 && cx < 24 ? '#8a5a34' : null; // falso frontal
+      if (Math.abs(cx - 13) > 11.5) return null;
+      if (y >= 14 && Math.abs(cx - 13) < 2.2) return '#1a0f08'; // puertas batientes
+      if (y >= 8 && y <= 11 && (Math.abs(cx - 6.5) < 1.6 || Math.abs(cx - 19.5) < 1.6)) return '#7fd0f0';
+      return y % 3 === 0 ? '#8a5a34' : x < 13 ? '#b8864e' : '#9a6c3c';
+    }, '#2a1408'));
+  make(scene, 'mesa', 22, 26, (c) =>
+    mask(c, 22, 26, (x, y) => {
+      const cx = x + 0.5;
+      const half = y < 6 ? 6 + y * 0.6 : 9.6 + (y - 6) * 0.25;
+      if (Math.abs(cx - 11) > half) return null;
+      return y % 6 === 5 ? '#a8582e' : cx < 11 ? '#d8885a' : '#b8683a';
+    }, '#4a2414'));
+  make(scene, 'tumbleweed', 8, 8, (c) =>
+    mask(c, 8, 8, (x, y) => {
+      const d = Math.hypot(x + 0.5 - 4, y + 0.5 - 4);
+      if (d > 3.6) return null;
+      return (x * 3 + y * 5) % 4 === 0 ? '#8a6a3a' : '#c8a060';
+    }, '#4a2414'));
+  make(scene, 'traincar', 24, 12, (c) =>
+    mask(c, 24, 12, (x, y) => {
+      if (y >= 9 && y <= 11) return (x % 6 < 3) ? '#2a2a30' : null; // ruedas
+      if (y >= 1 && y <= 8 && x >= 0 && x <= 23) return y === 1 ? '#6a2a1a' : x % 6 === 5 ? '#4a1a10' : x < 12 ? '#9a3a24' : '#7a2c1a';
+      return null;
+    }, '#1a0a08'));
+  // --- castillo medieval: castillo, torre, estandarte, catapulta y bala de heno
+  make(scene, 'castle', 32, 30, (c) =>
+    mask(c, 32, 30, (x, y) => {
+      const cx = x + 0.5;
+      const tower = (tx: number, w: number, top: number) => Math.abs(cx - tx) <= w && y >= top;
+      // almenas: dientes en lo alto de torres y muralla
+      const crown = (tx: number, w: number, top: number) => y < top + 2 && Math.abs(cx - tx) <= w && (Math.floor(cx - tx + 20) % 3 === 0);
+      if (crown(6, 4.6, 8) || crown(26, 4.6, 8) || crown(16, 4.6, 2)) return '#9aa0b4';
+      if (tower(6, 4.6, 10) || tower(26, 4.6, 10) || tower(16, 5.6, 4) || (Math.abs(cx - 16) <= 12 && y >= 16)) {
+        if (y >= 20 && Math.abs(cx - 16) < 2.6) return '#1a1008'; // puerta
+        if (((Math.abs(cx - 6) < 0.8 || Math.abs(cx - 26) < 0.8) && y >= 13 && y <= 15) || (Math.abs(cx - 16) < 0.9 && y >= 9 && y <= 12)) return '#ffe070'; // ventanas
+        return (x * 3 + y) % 6 === 0 ? '#7a8094' : cx < 16 ? '#b0b6c8' : '#8a90a4';
+      }
+      if (x === 16 && y >= 0 && y < 4) return '#4a3220';
+      if (x >= 17 && x <= 20 && y >= 0 && y <= 2) return '#e8344a'; // banderín
+      return null;
+    }, '#141c30'));
+  make(scene, 'tower', 10, 26, (c) =>
+    mask(c, 10, 26, (x, y) => {
+      if (y < 3) return x % 3 !== 1 ? '#9aa0b4' : null;
+      if (x < 1 || x > 8) return null;
+      if (y >= 8 && y <= 10 && (x === 4 || x === 5)) return '#ffe070';
+      return (x + y * 2) % 7 === 0 ? '#7a8094' : x < 5 ? '#b0b6c8' : '#8a90a4';
+    }, '#141c30'));
+  make(scene, 'banner', 6, 16, (c) => {
+    rect(c, 1, 0, 1, 16, '#4a3220');
+    rect(c, 2, 1, 4, 8, '#e8344a');
+    rect(c, 2, 1, 4, 1, '#ff7a8a');
+    for (let i = 0; i < 4; i++) px(c, 2 + i, 9 + (i < 2 ? i : 3 - i), '#e8344a');
+    rect(c, 3, 3, 2, 2, '#ffd040');
+  });
+  make(scene, 'catapult', 18, 14, (c) =>
+    mask(c, 18, 14, (x, y) => {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (Math.hypot(cx - 5, cy - 11) <= 2.6 || Math.hypot(cx - 13, cy - 11) <= 2.6) return '#6a4426'; // ruedas
+      if (cy >= 9 && cy <= 11 && cx >= 3 && cx <= 15) return '#8a5a34';
+      if (cx >= 6 && cx <= 8 && cy >= 2 && cy <= 9 && Math.abs(cx - 7 - (cy - 9) * -0.1) < 1.4) return '#9a6c3c';
+      if (cy >= 1 + (cx - 6) * 0.4 && cy <= 2.6 + (cx - 6) * 0.4 && cx >= 3 && cx <= 14) return '#b8864e'; // brazo
+      if (Math.hypot(cx - 3.6, cy - 1.2) <= 1.8) return '#6a6a74'; // piedra
+      return null;
+    }, '#1a1008'));
+  make(scene, 'haybale', 10, 8, (c) =>
+    mask(c, 10, 8, (x, y) => {
+      if (x < 0 || x > 9) return null;
+      return y === 3 || y === 5 ? '#a8842c' : (x + y) % 3 === 0 ? '#e8c860' : '#d8b444';
+    }, '#4a3410'));
+  // banco de arena de marea (casilla de 12×12 que se repite)
+  make(scene, 'sandbar', 12, 12, (c) => {
+    rect(c, 0, 0, 12, 12, '#f6e4b2');
+    rect(c, 0, 0, 12, 1, '#fff5d2');
+    rect(c, 0, 1, 12, 1, '#f9ebc2');
+    rect(c, 0, 10, 12, 2, '#dcc18c');
+    rect(c, 0, 11, 12, 1, '#a9854f');
+    for (const [x, y] of [[2, 4], [7, 3], [4, 7], [9, 7], [10, 5]]) px(c, x, y, '#ead09a');
+    rect(c, 1, 5, 3, 1, '#e8cd92');
+    rect(c, 6, 8, 4, 1, '#e8cd92');
+  });
+  // mar: tira que se repite en horizontal bajo las islas
+  make(scene, 'sea', 48, 40, (c) => {
+    for (let x = 0; x < 48; x++) {
+      const wy = 1 + Math.round(Math.sin((x / 48) * Math.PI * 4));
+      rect(c, x, wy, 1, 40 - wy, '#2fc4d8');
+      rect(c, x, 16, 1, 24, '#22aac4');
+      rect(c, x, 28, 1, 12, '#1a8eab');
+      px(c, x, wy, '#e4fdff');
+      px(c, x, wy + 1, '#8ae9f3');
+    }
+    for (const [x, y] of [[6, 10], [20, 7], [34, 12], [44, 8]]) rect(c, x, y, 4, 1, '#b8f4fa');
+  });
   make(scene, 'glowshroom', 7, 7, (c) =>
     bitmap(c, 0, 0, ['.ooooo.', 'ocwcbco', 'occccco', '.oosoo.', '...s...', '...s...', '..ooo..'], { o: '#1d2a5a', c: '#7fe3f5', w: '#ffffff', b: '#4ab8ea', s: '#e8e0f0' }),
   );
@@ -396,7 +1198,7 @@ function generateSky(scene: Phaser.Scene) {
       const w = 240;
       const h = 80;
       // la pradera tiene colinas verdes; de noche, siluetas oscuras para que no parezcan dibujos de línea
-      const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : T.bgB;
+      const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : k === 'beach' ? (layer ? '#e6c98e' : '#f2deb2') : k === 'swamp' ? (layer ? '#3c5a47' : '#587a64') : T.bgB;
       const body = mix(base, T.outline, dark);
       const rim = T.sky === 'night' ? mix(T.bgA, T.outline, 0.1) : mix(base, '#ffffff', 0.3);
       const FILL = 420; // la tierra de las colinas se prolonga hacia abajo y se funde con la neblina
@@ -424,6 +1226,25 @@ function generateSky(scene: Phaser.Scene) {
             const a = (tx / w) * Math.PI * 2;
             const top = Math.round(h * 0.42 + Math.sin(a * f1 * 2 + seed) * 12 + Math.sin(a * f2 * 5 + seed * 2) * 6 + Math.sin(a * 11 + seed) * 1.5);
             const tree = mix(body, T.outline, 0.25);
+            if (k === 'swamp') {
+              // cipreses lejanos con musgo colgando
+              rect(c, tx, top - 9, 1, 9, tree);
+              rect(c, tx - 3, top - 12, 7, 3, tree);
+              rect(c, tx - 2, top - 14, 5, 2, tree);
+              rect(c, tx - 1, top - 15, 3, 1, tree);
+              for (const dx of [-3, 0, 3]) rect(c, tx + dx, top - 9, 1, 3 + ((tx + dx) % 3), tree);
+              continue;
+            }
+            if (k === 'beach') {
+              // palmeritas lejanas
+              rect(c, tx, top - 8, 1, 8, tree);
+              rect(c, tx - 3, top - 9, 7, 1, tree);
+              rect(c, tx - 2, top - 10, 5, 1, tree);
+              px(c, tx - 4, top - 8, tree);
+              px(c, tx + 4, top - 8, tree);
+              rect(c, tx - 1, top - 11, 3, 1, tree);
+              continue;
+            }
             rect(c, tx, top - 6, 1, 6, tree);
             rect(c, tx - 2, top - 9, 5, 4, tree);
             rect(c, tx - 1, top - 11, 3, 2, tree);

@@ -5,6 +5,8 @@ import { WORLDS } from '../data/worlds';
 
 const LEVEL_IDS = new Set(LEVELS.map((l) => l.id));
 const devGachaPulls = new Set<string>();
+/** Nivel activo de cada mejora en modo DEV (por defecto, el máximo). No toca el guardado real */
+const devActive: Partial<Record<UpgradeId, number>> = {};
 const BALL_ID_MIGRATIONS: Record<string, string> = {
   big: 'heavy',
   cork: 'feather',
@@ -18,12 +20,18 @@ function migratedBallId(id: unknown): string | null {
   return BALL_TYPES.some((ball) => ball.id === nextId) ? nextId : null;
 }
 
+/** Estilos de imagen del juego (filtro de color sobre la cámara): ver LOOKS en ui/looks.ts */
+export type LookId = 'normal' | 'vivid' | 'soft' | 'cine';
+export const LOOK_IDS: LookId[] = ['normal', 'vivid', 'soft', 'cine'];
+
 export interface Settings {
   /** volumen 0–1 */
   music: number;
   sfx: number;
   vibration: boolean;
   shake: boolean;
+  /** estilo de imagen */
+  look: LookId;
 }
 
 export interface LevelResult {
@@ -64,7 +72,7 @@ export interface CoinLine {
 const KEY = 'vertical-golf:progress:v1';
 const BACKUP = `${KEY}:backup`;
 
-const DEFAULT_SETTINGS: Settings = { music: 0.6, sfx: 1, vibration: true, shake: true };
+const DEFAULT_SETTINGS: Settings = { music: 0.6, sfx: 1, vibration: true, shake: true, look: 'normal' };
 
 const fresh = (): SaveState => ({
   levels: {}, coins: 0, upgrades: {}, activeUpgradeLevels: {}, tokens: 0, trails: [DEFAULT_TRAIL], trail: DEFAULT_TRAIL, skins: ['classic'], skin: 'classic', balls: [DEFAULT_BALL], ball: DEFAULT_BALL, settings: { ...DEFAULT_SETTINGS },
@@ -128,6 +136,7 @@ function sanitize(p: any): SaveState {
     sfx: num(st.sfx, legacyOff ? 0 : DEFAULT_SETTINGS.sfx, 0, 1),
     vibration: bool(st.vibration, DEFAULT_SETTINGS.vibration),
     shake: bool(st.shake, DEFAULT_SETTINGS.shake),
+    look: LOOK_IDS.includes(st.look) ? st.look : DEFAULT_SETTINGS.look,
   };
   return s;
 }
@@ -184,13 +193,34 @@ export const progress = {
   },
   setDevMode(on: boolean) {
     const enabled = !!on;
-    if (enabled !== dev) devGachaPulls.clear();
+    if (enabled !== dev) {
+      devGachaPulls.clear();
+      for (const k of Object.keys(devActive) as UpgradeId[]) delete devActive[k];
+    }
     dev = enabled;
     try {
       if (dev) localStorage.setItem(DEV_KEY, '1');
       else localStorage.removeItem(DEV_KEY);
     } catch {
       /* sin almacenamiento */
+    }
+  },
+
+  /**
+   * Borra todo el progreso (hoyos, monedas, mejoras, bolas, skins, rastros y fichas) y empieza de cero.
+   * Se conservan los ajustes (música, efectos, vibración, temblor) y el modo DEV. Se borra también la copia de seguridad,
+   * para que el progreso antiguo no se pueda recuperar por error.
+   */
+  resetAll() {
+    const keep = { ...state.settings };
+    state = fresh();
+    state.settings = keep;
+    devGachaPulls.clear();
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+      localStorage.removeItem(BACKUP);
+    } catch {
+      /* sin almacenamiento: el reinicio vale solo para esta sesión */
     }
   },
 
@@ -239,11 +269,12 @@ export const progress = {
   record(i: string, { strokes, stars, par }: { strokes: number; stars: number; par: number }) {
     const prev = state.levels[i];
     // monedas (para las mejoras)
-    const lines: CoinLine[] = [{ label: 'Hoyo completado', amount: ECONOMY.complete }];
-    const newStars = Math.max(0, stars - (prev?.stars || 0));
-    if (newStars) lines.push({ label: `Estrellas nuevas ×${newStars}`, amount: newStars * ECONOMY.star });
-    if (strokes === 1) lines.push({ label: 'Hoyo en uno', amount: ECONOMY.holeInOne });
-    else if (strokes < par) lines.push({ label: 'Bajo par', amount: ECONOMY.underPar });
+    // Cada estrella paga una sola vez, por escalones (5 + 5 + 10 = 20 con 3 estrellas): solo se cobra lo nuevo, así que repetirlo no da más
+    const lines: CoinLine[] = [];
+    const starNames = ['Hoyo completado', 'Segunda estrella', 'Tercera estrella'];
+    for (let s = prev ? prev.stars : 0; s < stars; s++) lines.push({ label: starNames[s], amount: ECONOMY.starCoins[s] });
+    if (strokes === 1 && ECONOMY.holeInOne > 0) lines.push({ label: 'Hoyo en uno', amount: ECONOMY.holeInOne });
+    else if (strokes < par && ECONOMY.underPar > 0) lines.push({ label: 'Bajo par', amount: ECONOMY.underPar });
     const coins = lines.reduce((s, l) => s + l.amount, 0);
     // fichas (para el gachapón): una por terminar y otra más con 3 estrellas, cada vez
     const tokens = ECONOMY.tokens + (stars === 3 ? ECONOMY.tokens3Stars : 0);
@@ -268,10 +299,12 @@ export const progress = {
 
   // ---- mejoras
   upgradeLevel(id: UpgradeId): number {
+    if (dev) return upgradeDef(id).values.length - 1; // modo DEV: todas las mejoras al máximo
     return state.upgrades[id] || 0;
   },
   /** Nivel de mejora elegido para usar; 0 significa que está desactivada. */
   upgradeActiveLevel(id: UpgradeId): number {
+    if (dev) return devActive[id] ?? this.upgradeLevel(id);
     return state.activeUpgradeLevels[id] ?? 0;
   },
   /** Valor actual de la mejora (p. ej. multiplicador de potencia). */
@@ -287,6 +320,10 @@ export const progress = {
   setUpgradeActiveLevel(id: UpgradeId, level: number): boolean {
     if (!Number.isInteger(level) || level < 0 || level > this.upgradeLevel(id)) return false;
     if (this.upgradeActiveLevel(id) === level) return true;
+    if (dev) {
+      devActive[id] = level; // en modo DEV se puede cambiar el nivel activo sin tocar el guardado real
+      return true;
+    }
     state.activeUpgradeLevels[id] = level;
     save();
     return true;

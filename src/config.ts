@@ -13,7 +13,8 @@ const debug = new URLSearchParams(window.location.search).has('debug');
 
 // Zoom entero según los píxeles físicos disponibles (nítido en móviles con alta densidad)
 const dpr = Math.min(window.devicePixelRatio || 1, 3);
-VIEW.Z = Phaser.Math.Clamp(Math.floor(Math.min((window.innerWidth * dpr) / W, (window.innerHeight * dpr) / H)), 2, 5);
+// (se redondea al más cercano, no hacia abajo: así el lienzo se escala lo menos posible para llenar la pantalla)
+VIEW.Z = Phaser.Math.Clamp(Math.round(Math.min((window.innerWidth * dpr) / W, (window.innerHeight * dpr) / H)), 2, 5);
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,

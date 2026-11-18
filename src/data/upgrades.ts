@@ -31,32 +31,32 @@ export interface Skin {
 export const UPGRADES: Upgrade[] = [
   {
     id: 'power', name: 'Potencia', desc: 'Golpes más fuertes', icon: 'up-power',
-    costs: [40, 90, 160], values: [1, 1.08, 1.16, 1.25],
+    costs: [50, 100, 200], values: [1, 1.08, 1.16, 1.25],
     fmt: (v) => (v === 1 ? 'Normal' : `+${Math.round((v - 1) * 100)}%`),
   },
   {
     id: 'aim', name: 'Visor', desc: 'Ves más trayectoria al apuntar', icon: 'up-aim',
-    costs: [30, 70, 130], values: [0.3, 0.5, 0.75, 1.1],
+    costs: [50, 100, 200], values: [0.3, 0.5, 0.75, 1.1],
     fmt: (v) => ({ 0.3: 'Corto', 0.5: 'Medio', 0.75: 'Largo', 1.1: 'Completo' } as Record<number, string>)[v] ?? String(v),
   },
   {
     id: 'grip', name: 'Agarre', desc: 'La bola frena antes al aterrizar', icon: 'up-grip',
-    costs: [40, 80, 140], values: [1, 1.5, 2, 2.6],
+    costs: [50, 100, 200], values: [1, 1.5, 2, 2.6],
     fmt: (v) => (v === 1 ? 'Normal' : `×${v}`),
   },
   {
     id: 'magnet', name: 'Imán de hoyo', desc: 'El hoyo atrae la bola desde más lejos', icon: 'up-magnet',
-    costs: [50, 100, 170], values: [18, 28, 38, 50],
+    costs: [50, 100, 200], values: [18, 28, 38, 50],
     fmt: (v) => `${Math.round(v / 12 * 10) / 10} casillas`,
   },
   {
     id: 'brake', name: 'Freno aéreo', desc: 'Botón para frenar la bola en el aire', icon: 'up-brake',
-    costs: [70, 130, 200], values: [0, 1, 2, 3],
+    costs: [150], values: [0, 1],
     fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
   },
   {
     id: 'shield', name: 'Salvavidas', desc: 'Anula penalizaciones de agua y sierras', icon: 'up-shield',
-    costs: [60, 140], values: [0, 1, 2],
+    costs: [150], values: [0, 1],
     fmt: (v) => (v ? `${v} por hoyo` : 'Bloqueado'),
   },
 ];
@@ -113,10 +113,12 @@ export const SKINS: Skin[] = [
 
 /**
  * Al terminar un hoyo:
- *   monedas (mejoras): complete por terminar, star por cada estrella NUEVA, underPar / holeInOne
+ *   monedas (mejoras): cada estrella paga una vez, por escalones: la 1.ª (hoyo completado) 5, la 2.ª 5 más y la 3.ª 10 más,
+ *     así que el total de un hoyo es 5, 10 o 20 monedas según sus estrellas. Solo se cobra lo nuevo: repetir un hoyo sin mejorar no da monedas.
+ *     underPar y holeInOne son bonus extra; con 0 no se pagan ni se muestran
  *   fichas (gachapón): tokens por terminar + tokens3Stars extra si es con 3 estrellas (cada vez)
  */
-export const ECONOMY = { complete: 3, star: 8, underPar: 5, holeInOne: 15, tokens: 1, tokens3Stars: 1 };
+export const ECONOMY = { starCoins: [5, 5, 10], underPar: 0, holeInOne: 0, tokens: 1, tokens3Stars: 1 };
 
 export function upgradeDef(id: UpgradeId): Upgrade {
   const u = UPGRADES.find((u) => u.id === id);

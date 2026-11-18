@@ -7,7 +7,22 @@ import { TILE as T, type MaterialKey } from '../constants';
  */
 
 /** Casillas sólidas enteras y su material */
-export const FULL_MAT: Record<string, MaterialKey> = { '#': 'grass', G: 'grass', r: 'rough', s: 'sand', i: 'ice' };
+export const FULL_MAT: Record<string, MaterialKey> = { '#': 'grass', G: 'grass', r: 'rough', s: 'sand', i: 'ice', m: 'mud', q: 'quicksand' };
+
+/** Ciclo de los bancos de arena de marea 'T' (ms): TIDE_LOW con el banco a la vista y el resto bajo el agua. Lo comparten el juego y el validador */
+export const TIDE_PERIOD = 12000;
+export const TIDE_LOW = 8000;
+/** desfase entre un banco y el siguiente (ms), para que no suban y bajen a la vez */
+export const TIDE_PHASE_STEP = 4000;
+
+/** Bloques frágiles 'C' (ms): tiempo desde que se pisan hasta que caen, y hasta que reaparecen. Lo comparten el juego y el validador */
+export const CRUMBLE_DELAY = 2600;
+export const CRUMBLE_RESTORE = 4000;
+
+/** Velocidad (px/s) con la que un bumper lanza la bola; los corales de la Playa rebotan algo más. Lo comparten el juego y el validador */
+export const BUMPER_SPEED = 280;
+export const CORAL_SPEED = 360;
+export const bumperSpeed = (theme: string) => (theme === 'beach' ? CORAL_SPEED : BUMPER_SPEED);
 
 /** Grosor (px) de las plataformas finas '=' */
 export const THIN_H = 7;

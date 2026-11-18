@@ -5,6 +5,7 @@ import { Background } from '../gfx/background';
 import { renderTerrain } from '../gfx/terrain';
 import { tintFill } from '../gfx/tint';
 import { openSettings, type SettingsPanel } from '../ui/settings';
+import { applyLook } from '../ui/looks';
 import { LEVELS } from '../data/levels';
 import { UPGRADES } from '../data/upgrades';
 import { progress } from '../systems/progress';
@@ -28,6 +29,7 @@ type Cloud = Phaser.GameObjects.Image & { vx: number };
 export default class MenuScene extends Phaser.Scene {
   bg!: Background;
   clouds: Cloud[] = [];
+  resetPanel: Phaser.GameObjects.Container | null = null;
   ballY = 0;
   ball!: Phaser.GameObjects.Sprite;
   trail!: Phaser.GameObjects.Graphics;
@@ -120,27 +122,67 @@ export default class MenuScene extends Phaser.Scene {
     this.settingsPanel = null;
     const openPanel = () => {
       if (this.settingsPanel) return;
-      this.settingsPanel = openSettings(this, { onClose: () => (this.settingsPanel = null) });
+      this.settingsPanel = openSettings(this, {
+        onClose: () => (this.settingsPanel = null),
+        // el modo DEV y borrar la partida viven en los ajustes
+        extras: { onDevChange: () => this.scene.restart(), onReset: () => this.confirmReset() },
+      });
     };
     iconButton(this, W - 16, 14, 'gear', openPanel);
+    if (progress.devMode) label(this, W - 38, 14, 'DEV', 8, { color: PAL.orange, weight: '700', strokeThickness: 2 });
 
-    // Modo DEV: todo desbloqueado (mundos, hoyos, bolas y mejoras gratis)
-    makeButton(this, W - 56, 14, {
-      color: progress.devMode ? 'orange' : 'gray', w: 38, h: 18, text: progress.devMode ? 'DEV ON' : 'DEV', size: 7,
-      onClick: () => {
-        progress.setDevMode(!progress.devMode);
-        this.scene.restart();
-      },
+    this.resetPanel = null;
+    // estilo de imagen elegido en los ajustes (se ve al momento en el menú)
+    applyLook(this.cameras.main);
+    const offLook = progress.onSettingsChange((key) => {
+      if (key === 'look') applyLook(this.cameras.main);
     });
-    this.input.keyboard?.on('keydown-ESC', () => this.settingsPanel?.close());
+    this.events.once('shutdown', () => offLook());
+    this.input.keyboard?.on('keydown-ESC', () => {
+      if (this.resetPanel) this.closeReset();
+      else this.settingsPanel?.close();
+    });
     this.input.keyboard?.on('keydown-ENTER', () => {
-      if (!this.settingsPanel) this.go('Game', { levelIndex: next });
+      if (!this.settingsPanel && !this.resetPanel) this.go('Game', { levelIndex: next });
     });
     music.play(theme);
     music.setPaused(false);
 
     label(this, W / 2, H - 9, isSupabaseEnabled ? '● online' : '○ offline', 8, { color: '#f0dcc0', strokeThickness: 2 }).setDepth(20);
 
+  }
+
+  /** Ventana de confirmación: borra todo el progreso y reinicia el menú */
+  confirmReset() {
+    if (this.resetPanel) return;
+    sfx.click();
+    const c = this.add.container(W / 2, H / 2).setDepth(95);
+    const blocker = this.add.rectangle(0, 0, W, H, 0x35282c, 0.7).setInteractive();
+    blocker.on('pointerdown', (_p: Phaser.Input.Pointer, _x: number, _y: number, e?: Phaser.Types.Input.EventData) => e?.stopPropagation?.());
+    c.add([
+      blocker,
+      panel(this, 0, 0, 200, 132),
+      label(this, 0, -46, '¿BORRAR PARTIDA?', 14, { weight: '700', color: '#ff9a8a', strokeThickness: 3 }),
+      label(this, 0, -18, 'Se borrarán hoyos, estrellas, monedas, mejoras y bolas. No se puede deshacer.', 8, { wrap: 170, color: '#fff8ec', strokeThickness: 2 }),
+      makeButton(this, -46, 34, { color: 'white', w: 78, h: 26, text: 'CANCELAR', size: 10, onClick: () => this.closeReset() }),
+      makeButton(this, 46, 34, {
+        color: 'orange', w: 78, h: 26, text: 'BORRAR', size: 11,
+        onClick: () => {
+          progress.resetAll();
+          sfx.hazard();
+          this.closeReset();
+          this.scene.restart();
+        },
+      }),
+    ]);
+    c.setAlpha(0).setScale(0.9);
+    this.tweens.add({ targets: c, alpha: 1, scale: 1, duration: 140, ease: 'Back.easeOut' });
+    this.resetPanel = c;
+  }
+
+  closeReset() {
+    this.resetPanel?.destroy();
+    this.resetPanel = null;
   }
 
   hop() {

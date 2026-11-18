@@ -296,17 +296,17 @@ export default class UIScene extends Phaser.Scene {
     const dir = Math.sign(wind);
     const a = Math.abs(wind);
     const k = Math.min(1, a / 45); // 0 = brisa, 1 = racha fuerte
-    const sp = 40 + a * 3.5;
+    const sp = 55 + a * 4;
     const common = {
       x: dir > 0 ? -24 : W + 24,
       y: { min: 50, max: H - 10 },
       speedX: dir > 0 ? { min: sp, max: sp * 1.5 } : { min: -sp * 1.5, max: -sp },
     };
     const streaks = this.add
-      .particles(0, 0, 'streak', { ...common, lifespan: 3400, scaleX: { min: 1.5 + 2 * k, max: 3 + 5 * k }, alpha: { start: 0.13 + 0.12 * k, end: 0 }, frequency: 260 - 150 * k })
+      .particles(0, 0, 'streak', { ...common, lifespan: 3400, scaleX: { min: 2 + 3 * k, max: 4 + 7 * k }, alpha: { start: 0.24 + 0.16 * k, end: 0 }, frequency: 170 - 100 * k })
       .setDepth(-5);
     const leaves = this.add
-      .particles(0, 0, 'leaf', { ...common, lifespan: 3200, speedY: { min: -8, max: 14 }, rotate: { start: 0, end: 360 * dir }, alpha: { start: 0.6, end: 0 }, frequency: 1100 - 600 * k })
+      .particles(0, 0, 'leaf', { ...common, lifespan: 3200, speedY: { min: -8, max: 14 }, rotate: { start: 0, end: 360 * dir }, alpha: { start: 0.8, end: 0 }, frequency: 750 - 400 * k })
       .setDepth(-5);
     this.windParticles.push(streaks, leaves);
   }
@@ -355,6 +355,7 @@ export default class UIScene extends Phaser.Scene {
 
   showIntroCard() {
     const I = this.info;
+    sfx.tee();
     const c = this.add.container(W / 2, Math.round(H * 0.4));
     c.add([
       panel(this, 0, 0, 176, 84),

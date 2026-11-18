@@ -130,8 +130,91 @@ export const sfx = {
     tone(1100, 0.05, { vol: 0.06 });
     tone(1650, 0.06, { vol: 0.05, delay: 0.04 });
   },
-  land(v = 200) {
-    tone(90 + Math.min(v, 600) * 0.1, 0.05, { type: 'triangle', vol: Math.min(0.25, v / 1500) });
+  /** Aterrizaje: cada suelo suena distinto (hierba: golpe seco; arena: "fsh" blando; rough: roce de hierba alta; hielo: tintineo; madera: toc) */
+  land(v = 200, mat = 'grass') {
+    const k = Math.min(1, v / 600);
+    switch (mat) {
+      case 'sand':
+        noise(0.14, { vol: 0.05 + k * 0.18, freq: 900 });
+        tone(70, 0.05, { type: 'sine', vol: 0.03 + k * 0.05 });
+        break;
+      case 'rough':
+        noise(0.12, { vol: 0.04 + k * 0.14, freq: 3200, type: 'highpass' });
+        tone(110, 0.05, { type: 'triangle', vol: 0.04 + k * 0.07 });
+        break;
+      case 'ice':
+        tone(1900, 0.05, { type: 'triangle', vol: 0.04 + k * 0.06 });
+        tone(2850, 0.07, { type: 'triangle', vol: 0.03 + k * 0.04, delay: 0.02 });
+        break;
+      case 'wood':
+        tone(210, 0.05, { type: 'square', vol: 0.04 + k * 0.1, slideTo: 140 });
+        noise(0.03, { vol: 0.05 + k * 0.08, freq: 1800 });
+        break;
+      case 'mud':
+      case 'quicksand':
+        noise(0.16, { vol: 0.06 + k * 0.16, freq: 520 });
+        tone(75, 0.08, { type: 'sine', vol: 0.04 + k * 0.06, slideTo: 50 });
+        break;
+      case 'crumble':
+        noise(0.1, { vol: 0.06 + k * 0.1, freq: 1400 });
+        tone(120, 0.05, { type: 'triangle', vol: 0.05 + k * 0.06 });
+        break;
+      default:
+        tone(90 + Math.min(v, 600) * 0.1, 0.05, { type: 'triangle', vol: Math.min(0.25, v / 1500) });
+    }
+  },
+  /** Pinzazo de cangrejo (en la Playa sustituye al zumbido de la sierra) */
+  pinch() {
+    tone(1900, 0.03, { type: 'square', vol: 0.1 });
+    tone(1250, 0.03, { type: 'square', vol: 0.09, delay: 0.06 });
+    noise(0.04, { vol: 0.12, freq: 5200, type: 'highpass', delay: 0.06 });
+    tone(320, 0.18, { type: 'sawtooth', slideTo: 110, vol: 0.07, delay: 0.12 });
+  },
+  /** Croar de rana lejano (ambiente del pantano) */
+  croak() {
+    tone(150 + Math.random() * 40, 0.08, { type: 'sawtooth', slideTo: 95, vol: 0.035 });
+    tone(190 + Math.random() * 40, 0.07, { type: 'sawtooth', slideTo: 110, vol: 0.03, delay: 0.11 });
+  },
+  /** Burbuja que sube del fango */
+  bubble() {
+    tone(420 + Math.random() * 260, 0.07, { type: 'sine', slideTo: 900, vol: 0.04 });
+  },
+  /** La arena movediza te traga */
+  sink() {
+    noise(0.6, { vol: 0.16, freq: 500 });
+    tone(140, 0.6, { type: 'sine', slideTo: 55, vol: 0.1 });
+  },
+  /** Cangrejo aplastado: crujido corto y un "pop" que baja */
+  squash() {
+    noise(0.1, { vol: 0.18, freq: 900 });
+    tone(260, 0.12, { type: 'triangle', slideTo: 70, vol: 0.12, delay: 0.02 });
+  },
+  /** Silbido de caída al salir de los límites */
+  fall() {
+    tone(1000, 0.55, { type: 'sine', slideTo: 130, vol: 0.09 });
+    noise(0.4, { vol: 0.05, freq: 1500, type: 'bandpass' });
+  },
+  /** Campanita de inicio de hoyo */
+  tee() {
+    tone(784, 0.1, { type: 'triangle', vol: 0.07 });
+    tone(1175, 0.16, { type: 'triangle', vol: 0.07, delay: 0.09 });
+  },
+  /** Cambio de viento: ráfaga corta que sube o baja de tono según la dirección */
+  windShift(dir = 1) {
+    noise(0.5, { vol: 0.09, freq: dir > 0 ? 2200 : 1400, type: 'bandpass' });
+    tone(dir > 0 ? 300 : 520, 0.4, { type: 'sine', slideTo: dir > 0 ? 520 : 300, vol: 0.025 });
+  },
+  /** Pequeño "tic" al hacer zoom con la rueda (sube con el zoom) */
+  zoomTick(zoom = 1) {
+    tone(380 + zoom * 260, 0.02, { type: 'triangle', vol: 0.035 });
+  },
+  /** Viento de fondo continuo: 0 lo apaga; el signo da el lado (stereo) y el valor, la fuerza */
+  wind(strength: number) {
+    ambient('wind', Math.abs(strength) / 45, Math.sign(strength));
+  },
+  /** Mar de fondo (Playa): oleaje suave que sube y baja */
+  sea(on: boolean) {
+    ambient('sea', on ? 1 : 0, 0);
   },
   boing() {
     tone(160, 0.22, { slideTo: 700, vol: 0.1 });
@@ -196,6 +279,90 @@ export const sfx = {
     tone(660, 0.08, { vol: 0.08, delay: 0.05 });
   },
 };
+
+// ------------------------------------------------------------------ ambientes continuos (viento, mar)
+
+interface AmbientVoice {
+  src: AudioBufferSourceNode;
+  gain: GainNode;
+  filter: BiquadFilterNode;
+  pan: StereoPannerNode | null;
+  lfo: OscillatorNode;
+  lfoDepth: GainNode;
+  level: number;
+  dir: number;
+}
+const ambientVoices: Record<string, AmbientVoice | undefined> = {};
+let ambientPaused = false;
+
+/**
+ * Bucle de ruido filtrado con un LFO lento. `level` (0–1) es la fuerza; con 0 se apaga con un fundido.
+ *   wind: ruido de banda que sube de tono con la fuerza (silbido); ráfagas lentas
+ *   sea:  ruido grave con un oleaje de ~8 s
+ */
+function ambient(kind: 'wind' | 'sea', level: number, dir: number) {
+  const c = ac();
+  if (!c) return;
+  const t = c.currentTime;
+  let v = ambientVoices[kind];
+  const lv = Math.min(1, Math.max(0, level));
+  if (!v) {
+    if (lv <= 0) return;
+    const src = c.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    const filter = c.createBiquadFilter();
+    filter.type = kind === 'wind' ? 'bandpass' : 'lowpass';
+    filter.Q.value = kind === 'wind' ? 0.9 : 0.4;
+    const gain = c.createGain();
+    gain.gain.value = 0;
+    const lfo = c.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = kind === 'wind' ? 0.22 : 0.12;
+    const lfoDepth = c.createGain();
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(gain.gain); // el LFO mueve el volumen: ráfagas / olas
+    const pan = typeof c.createStereoPanner === 'function' ? c.createStereoPanner() : null;
+    src.connect(filter).connect(gain);
+    if (pan) gain.connect(pan).connect(sfxBus);
+    else gain.connect(sfxBus);
+    src.start(t, Math.random() * 0.8);
+    lfo.start(t);
+    v = ambientVoices[kind] = { src, gain, filter, pan, lfo, lfoDepth, level: 0, dir: 0 };
+  }
+  v.level = lv;
+  v.dir = dir;
+  const base = kind === 'wind' ? 0.03 + lv * 0.11 : 0.1 * lv;
+  const target = ambientPaused ? 0 : base;
+  v.gain.gain.cancelScheduledValues(t);
+  v.gain.gain.setTargetAtTime(target, t, 0.5);
+  v.lfoDepth.gain.setTargetAtTime(ambientPaused ? 0 : base * (kind === 'wind' ? 0.45 : 0.6), t, 0.5);
+  v.filter.frequency.setTargetAtTime(kind === 'wind' ? 500 + lv * 1500 : 520, t, 0.5);
+  if (v.pan) v.pan.pan.setTargetAtTime(dir * 0.35, t, 0.5);
+  if (lv <= 0) {
+    // se apaga y se libera pasado el fundido
+    const dead = v;
+    ambientVoices[kind] = undefined;
+    setTimeout(() => {
+      try {
+        dead.src.stop();
+        dead.lfo.stop();
+      } catch {
+        /* ya parado */
+      }
+    }, 1800);
+  }
+}
+
+/** Silencia (o devuelve) los ambientes al pausar */
+function setAmbientPaused(on: boolean) {
+  ambientPaused = on;
+  if (!ctx) return;
+  for (const kind of ['wind', 'sea'] as const) {
+    const v = ambientVoices[kind];
+    if (v) ambient(kind, v.level, v.dir);
+  }
+}
 
 // ------------------------------------------------------------------ vibración
 
@@ -443,6 +610,7 @@ export const music: MusicPlayer = {
     const t = ctx.currentTime;
     musicFilter.frequency.setTargetAtTime(on ? 650 : 12000, t, 0.08);
     musicDuck.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.08);
+    setAmbientPaused(on);
   },
 
   /** Baja la música un momento (para que se oiga una fanfarria) */

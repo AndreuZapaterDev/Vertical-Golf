@@ -4,12 +4,13 @@ import {
   W, H, VIEW, TILE, GRAVITY, MAX_SPEED, MAX_DRAG, FOLLOW_OFFSET, BALL_R, STEP, MATERIALS, THEMES, PAL, hex, FONT, FONT_SCALE,
   type MaterialKey, type Theme, type ThemeKey,
 } from '../constants';
-import { LEVELS, parseLevel, windAt, type ParsedLevel, type MechanicKey } from '../data/levels';
+import { LEVELS, parseLevel, windAt, fogAt, type ParsedLevel, type MechanicKey } from '../data/levels';
 import { renderTerrain, renderBlock, cellSolid } from '../gfx/terrain';
-import { terrainRects, terrainRamps, thinSolidFor } from '../data/terrainShapes';
+import { terrainRects, terrainRamps, thinSolidFor, TIDE_PERIOD, TIDE_LOW, TIDE_PHASE_STEP, CRUMBLE_DELAY, CRUMBLE_RESTORE, bumperSpeed } from '../data/terrainShapes';
 import { tintFill } from '../gfx/tint';
 import { bakeTexture, rgba, mixHex } from '../gfx/bake';
 import { sfx, music, haptic } from '../systems/audio';
+import { applyLook } from '../ui/looks';
 import { progress, type CoinLine } from '../systems/progress';
 import { SKINS, type Skin } from '../data/upgrades';
 import { trailById, ballTypeById, type Trail, type BallType } from '../data/cosmetics';
@@ -27,6 +28,7 @@ type GameBody = MatterBody & {
   mat?: MaterialKey;
   mover?: Mover;
   crumble?: Crumble;
+  tide?: Tide;
   sprite?: Phaser.GameObjects.Image;
 };
 
@@ -54,6 +56,22 @@ interface Crumble {
   w: number;
   state: 'idle' | 'shaking' | 'fallen';
 }
+
+/** Banco de arena de marea: sale a la vista (sólido) y se hunde (agua) en un ciclo fijo */
+interface Tide {
+  body: GameBody;
+  sand: Phaser.GameObjects.TileSprite;
+  water: Phaser.GameObjects.TileSprite;
+  x: number;
+  y: number;
+  w: number;
+  /** desfase del ciclo (ms) */
+  phase: number;
+  high: boolean;
+}
+
+/** aviso antes de que suba la marea (el banco parpadea) */
+const TIDE_WARN = 2000;
 
 /** Decoración que se agita cuando la bola aterriza cerca (matas, flores, arbustos) */
 type Decor = Phaser.GameObjects.Image | Phaser.GameObjects.Sprite;
@@ -94,7 +112,7 @@ interface CollisionEvent {
   pairs: CollisionPair[];
 }
 
-type PenaltyKind = 'water' | 'saw' | 'ob';
+type PenaltyKind = 'water' | 'saw' | 'ob' | 'sink';
 type GameState = 'intro' | 'play' | 'sinking' | 'done';
 
 /** Datos del hoyo para el HUD (UIScene) */
@@ -154,6 +172,9 @@ const RING = Array.from({ length: 12 }, (_, i) => [Math.cos((i / 12) * Math.PI *
 const SHOT_POWER_EXPONENT = 1.25;
 /** Cuánto se aleja la cámara con la máxima potencia (1/3 → zoom ×0,67, es decir, se ve 1,5 veces más mapa). Con 0 se desactiva */
 const AIM_ZOOM_OUT = 1 / 3;
+/** Límites del zoom con la rueda del ratón (relativo al zoom normal) */
+const WHEEL_ZOOM_MIN = 0.5;
+const WHEEL_ZOOM_MAX = 1.8;
 
 const shotPower = (dragLength: number) => Math.pow(Phaser.Math.Clamp(dragLength / MAX_DRAG, 0, 1), SHOT_POWER_EXPONENT);
 
@@ -228,18 +249,24 @@ export default class GameScene extends Phaser.Scene {
   waterFx: Phaser.GameObjects.TileSprite[] = [];
   bgTile!: Phaser.GameObjects.TileSprite;
   vignette!: Phaser.GameObjects.Image;
+  /** mar que rodea las islas en los hoyos abiertos de la Playa (y fango en el Pantano) */
+  sea: Phaser.GameObjects.TileSprite | null = null;
+  /** velo de niebla del Pantano (se centra en la bola) y su densidad actual */
+  fog: Phaser.GameObjects.Image | null = null;
+  fogDensity = 0;
+  /** ms que lleva la bola quieta sobre arena movediza */
+  sinkTime = 0;
   /** viento que sopla ahora mismo a la altura de la bola (cambia al cruzar una banda de viento) */
   curWind = 0;
   /** zoom relativo (1 = normal; menos = más lejos) que se ajusta con la potencia del golpe al apuntar */
   zoomK = 1;
-  /** zoom que se mantiene mientras la bola vuela tras un golpe fuerte */
-  zoomHold = 1;
   camOff: Vec = { x: 0, y: FOLLOW_OFFSET };
   sky: SkyObject[] = [];
   clouds: Cloud[] = [];
   ground: MatterBody | null = null;
   movers: Mover[] = [];
   crumbles: Crumble[] = [];
+  tides: Tide[] = [];
   /** plataformas finas '=' (se atraviesan desde abajo) */
   thins: GameBody[] = [];
   bumpers: GameBody[] = [];
@@ -283,6 +310,11 @@ export default class GameScene extends Phaser.Scene {
   onMove!: (p: Phaser.Input.Pointer) => void;
   onUp!: (p: Phaser.Input.Pointer) => void;
   onMiddleDown!: (e: MouseEvent) => void;
+  onWheel!: (p: Phaser.Input.Pointer, over: unknown, dx: number, dy: number) => void;
+  /** zoom que elige el jugador con la rueda del ratón (1 = normal); vuelve a 1 al disparar */
+  wheelZoom = 1;
+  offLook: (() => void) | null = null;
+  lastZoomTick = 0;
   /** cámara libre (botón central): no sigue a la bola hasta apuntar o golpear */
   freeCam = false;
   /** arrastre en curso: posición inicial del puntero y del scroll de la cámara */
@@ -368,13 +400,26 @@ export default class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setZoom(VIEW.Z);
     this.zoomK = 1;
-    this.zoomHold = 1;
+    this.wheelZoom = 1;
     this.curWind = windAt(L, this.L.start.r * T + T);
+    sfx.wind(this.curWind);
+    sfx.sea(L.theme === 'beach');
+    if (L.theme === 'swamp') this.time.addEvent({ delay: 2600, loop: true, callback: () => { const r = Math.random(); if (r < 0.5) sfx.croak(); else if (r < 0.8) sfx.bubble(); } });
+    // niebla (Pantano): un velo con un claro redondo que sigue a la bola
+    this.fog = null;
+    this.fogDensity = 0;
+    if (L.fogBands.length) this.fog = this.add.image(0, 0, 'fog').setScrollFactor(0).setDepth(20).setAlpha(0).setDisplaySize(960, 960);
+    this.sinkTime = 0;
     // En los hoyos abiertos la cámara deja ver un poco de vacío alrededor (se nota que son islas)
     const side = L.open ? 3 * T : 0;
     const bw = Math.max(this.worldW + side * 2, W);
     cam.setBounds((this.worldW - bw) / 2, 0, bw, this.worldH + (L.open ? 4 * T : 0));
     cam.setBackgroundColor(this.P.bgA);
+    // estilo de imagen elegido en los ajustes (y se actualiza al cambiarlo desde la pausa)
+    applyLook(cam);
+    this.offLook = progress.onSettingsChange((key) => {
+      if (key === 'look') applyLook(this.cameras.main);
+    });
 
     // Fondo de cuadros fijo a la pantalla que se desplaza más lento que el terreno (parallax).
     // Con zoom Z, un objeto con scrollFactor 0 en (W·(Z−1)/2, H·(Z−1)/2) cubre exactamente la vista.
@@ -408,7 +453,7 @@ export default class GameScene extends Phaser.Scene {
         const gr = c.createRadialGradient(32, 56, 14, 32, 56, 78);
         gr.addColorStop(0, 'rgba(10,18,40,0)');
         gr.addColorStop(0.6, 'rgba(10,18,40,0.07)');
-        gr.addColorStop(1, 'rgba(10,18,40,0.34)');
+        gr.addColorStop(1, 'rgba(10,18,40,0.26)');
         c.fillStyle = gr;
         c.fillRect(0, 0, 64, 112);
       }, { linear: true }))
@@ -426,6 +471,14 @@ export default class GameScene extends Phaser.Scene {
     this.add.image(0, 0, terrainKey).setOrigin(0).setDepth(5);
     this.buildClouds();
     this.decorate();
+    // Playa: las islas flotan sobre el mar (caer por un borde es caer al agua)
+    this.sea = null;
+    if ((L.theme === 'beach' || L.theme === 'swamp') && L.open) {
+      const swampy = L.theme === 'swamp';
+      this.sea = this.add.tileSprite(-320, this.worldH - 9, this.worldW + 640, 40, swampy ? 'bog' : 'sea').setOrigin(0).setDepth(4.5);
+      this.add.rectangle(-320, this.worldH + 31, this.worldW + 640, 120, swampy ? 0x1f4a30 : 0x1a8eab).setOrigin(0).setDepth(4.5);
+      this.tweens.add({ targets: this.sea, y: this.sea.y + 2.5, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
     // lo que se agita cuando la bola cae cerca
     const sway = new Set(['tuft', 'flower0', 'flower1', 'flower2', 'bush', 'glowshroom']);
     this.decor = this.children.list.filter(
@@ -451,6 +504,9 @@ export default class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.bus.removeAllListeners();
       this.teardownInput();
+      this.offLook?.();
+      sfx.wind(0);
+      sfx.sea(false);
       this.matter.world?.off('collisionstart', this.onCollStart);
       this.matter.world?.off('collisionactive', this.onCollActive);
       // el siguiente hoyo empieza con listas limpias (la escena se reutiliza)
@@ -459,6 +515,7 @@ export default class GameScene extends Phaser.Scene {
       this.clouds = [];
       this.movers = [];
       this.crumbles = [];
+      this.tides = [];
       this.thins = [];
       this.bumpers = [];
       this.saws = [];
@@ -728,6 +785,8 @@ export default class GameScene extends Phaser.Scene {
     const g = this.L.grid;
     const night = this.P.decor === 'night';
     const meadow = this.P.decor === 'meadow';
+    const beach = this.P.decor === 'beach';
+    const swamp = this.P.decor === 'swamp';
     const h = (a: number, b: number, s: number) => {
       let n = Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(s, 1442695041) + this.levelIndex * 97;
       n = Math.imul(n ^ (n >>> 13), 1274126177);
@@ -759,13 +818,38 @@ export default class GameScene extends Phaser.Scene {
           if (p < 0.1 && room && c - lastTree > 2 && Math.abs(c - this.L.start.c) > 2) {
             lastTree = c;
             const pine = h(r, c, 6) < 0.4;
-            this.add.image(c * T + 6, y + 1, pine ? 'tree-pine' : 'tree-round').setOrigin(0.5, 1).setDepth(4).setFlipX(h(r, c, 7) < 0.5);
+            this.sway(this.add.image(c * T + 6, y + 1, pine ? 'tree-pine' : 'tree-round').setOrigin(0.5, 1).setDepth(4).setFlipX(h(r, c, 7) < 0.5), 0.9);
           } else if (p < 0.2) this.add.image(x, y, 'bush').setOrigin(0.5, 1).setDepth(6);
           else if (p < 0.27 && run >= 3 && free(r - 1, c - 1)) this.add.tileSprite(c * T - 6, y + 1, 18, 8, 'fence').setOrigin(0, 1).setDepth(4);
           else if (p < 0.42) {
             const k = Math.floor(h(r, c, 4) * 3);
             this.add.sprite(x, y, `flower${k}`).setOrigin(0.5, 1).setDepth(6).play({ key: `flower${k}-sway`, delay: h(r, c, 5) * 800 });
           } else if (p < 0.6) this.add.sprite(x, y, 'tuft').setOrigin(0.5, 1).setDepth(6).play({ key: 'tuft-sway', startFrame: Math.floor(h(r, c, 3) * 2) });
+          continue;
+        }
+        if (swamp) {
+          // Pantano: cipreses con musgo, juncos, setas luminosas y alguna piedra
+          const room = free(r - 1, c) && free(r - 2, c) && free(r - 3, c);
+          if (p < 0.1 && room && c - lastTree > 3 && Math.abs(c - this.L.start.c) > 2) {
+            lastTree = c;
+            this.sway(this.add.image(c * T + 6, y + 1, 'cypress').setOrigin(0.5, 1).setDepth(4).setFlipX(h(r, c, 7) < 0.5), 0.7);
+          } else if (p < 0.24) this.add.sprite(x, y, 'reed').setOrigin(0.5, 1).setDepth(6).play({ key: 'reed-sway', startFrame: Math.floor(h(r, c, 3) * 2), delay: h(r, c, 5) * 900 });
+          else if (p < 0.31) {
+            this.add.image(x, y, 'glowshroom').setOrigin(0.5, 1).setDepth(6);
+            const gl = this.add.image(x, y - 5, 'glow').setTint(0x7fe3c0).setBlendMode('ADD').setScale(0.4).setAlpha(0.45).setDepth(6);
+            this.tweens.add({ targets: gl, alpha: 0.18, duration: 1200 + h(r, c, 6) * 900, yoyo: true, repeat: -1, delay: h(r, c, 8) * 800 });
+          } else if (p < 0.35) this.add.image(x, y, 'rock').setOrigin(0.5, 1).setDepth(6);
+          continue;
+        }
+        if (beach) {
+          // Playa: palmeras detrás del terreno, matas de duna, conchas, estrellas de mar y piedras
+          const room = free(r - 1, c) && free(r - 2, c) && free(r - 3, c);
+          if (p < 0.1 && room && c - lastTree > 3 && Math.abs(c - this.L.start.c) > 2) {
+            lastTree = c;
+            this.sway(this.add.image(c * T + 6, y + 1, 'palm').setOrigin(0.5, 1).setDepth(4).setFlipX(h(r, c, 7) < 0.5), 1.6);
+          } else if (p < 0.2) this.add.image(x, y, h(r, c, 6) < 0.5 ? 'shell' : 'starfish').setOrigin(0.5, 1).setDepth(6);
+          else if (p < 0.38) this.add.sprite(x, y, 'dune-tuft').setOrigin(0.5, 1).setDepth(6).play({ key: 'dune-tuft-sway', startFrame: Math.floor(h(r, c, 3) * 2) });
+          else if (p < 0.43) this.add.image(x, y, 'rock').setOrigin(0.5, 1).setDepth(6);
           continue;
         }
         if (p < 0.2) this.add.sprite(x, y, 'tuft').setOrigin(0.5, 1).setDepth(6).play({ key: 'tuft-sway', startFrame: Math.floor(h(r, c, 3) * 2) });
@@ -805,10 +889,21 @@ export default class GameScene extends Phaser.Scene {
       for (let c = 0; c < cols; c++) {
         if (g[r][c] !== 'W' || g[r - 1][c] === 'W' || h(r, c, 7) > 0.6) continue;
         const x = c * T + 3 + Math.floor(h(r, c, 8) * 5);
+        if (swamp && h(r, c, 12) < 0.7) {
+          const lp = this.add.image(c * T + 6, r * T + 2, 'lilypad').setDepth(6.3);
+          this.tweens.add({ targets: lp, y: lp.y + 1, duration: 1500 + h(r, c, 13) * 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: h(r, c, 14) * 1000 });
+        }
         const wv = this.add.image(x, r * T + 4, 'wave').setDepth(6).setAlpha(0);
         this.tweens.add({ targets: wv, alpha: 0.8, x: x + 2, duration: 700, yoyo: true, repeat: -1, repeatDelay: 600 + h(r, c, 9) * 1600, delay: h(r, c, 10) * 2000 });
       }
     }
+  }
+
+  /** Balanceo suave y lento de un árbol o una palmera (apoyado en su base) */
+  sway(o: Phaser.GameObjects.Image, amp: number) {
+    this.tweens.add({
+      targets: o, angle: { from: -amp, to: amp }, duration: 2400 + Math.random() * 1800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: Math.random() * 1800,
+    });
   }
 
   staticBody(x: number, y: number, w: number, h: number, mat: MaterialKey): GameBody {
@@ -845,7 +940,7 @@ export default class GameScene extends Phaser.Scene {
       const x = m.c * T;
       const y = m.r * T;
       const body = this.staticBody(x, y, w, 9, 'wood');
-      const sprite = this.add.image(x, y, renderBlock(this, `mover-${L.theme}-${w}`, w, 9, L.theme, 'grass')).setOrigin(0).setDepth(6);
+      const sprite = this.add.image(x, y, renderBlock(this, `mover-${L.theme}-${w}`, w, 9, L.theme, L.theme === 'beach' || L.theme === 'swamp' ? 'wood' : 'grass')).setOrigin(0).setDepth(6);
       // carril punteado (pre-dibujado: un Graphics se re-triangularía en cada fotograma)
       const railW = w + 48 + 2;
       this.add.image(x - 24, y + 4, bakeTexture(this, `rail-${L.theme}-${w}`, railW, 1, (c) => {
@@ -861,37 +956,77 @@ export default class GameScene extends Phaser.Scene {
       const x = cr.c * T;
       const y = cr.r * T;
       const body = this.staticBody(x, y, w, T, 'crumble');
-      const sprite = this.add.image(x, y, renderBlock(this, `crumble-${L.theme}-${w}`, w, T, L.theme, 'crumble')).setOrigin(0).setDepth(6);
+      // Pantano: nenúfares que se hunden (un parche por casilla); Playa: tablas de muelle; resto: bloques con grietas
+      const key = L.theme === 'swamp'
+        ? bakeTexture(this, `lily-${w}`, w, T, (c) => {
+            const src = this.textures.get('lilyblock').getSourceImage() as CanvasImageSource;
+            for (let i = 0; i < w / T; i++) c.drawImage(src, i * T, 0);
+          })
+        : renderBlock(this, `crumble-${L.theme}-${w}`, w, T, L.theme, L.theme === 'beach' ? 'wood' : 'crumble');
+      const sprite = this.add.image(x, y, key).setOrigin(0).setDepth(6);
       const c: Crumble = { body, sprite, x, y, w, state: 'idle' };
       body.crumble = c;
       return c;
+    });
+    this.tides = L.tides.map((td, i) => {
+      const w = td.n * T;
+      const x = td.c * T;
+      const y = td.r * T;
+      const body = this.staticBody(x, y, w, T, 'sand');
+      const sand = this.add.tileSprite(x, y, w, T, 'sandbar').setOrigin(0).setDepth(6);
+      // el agua que cubre el banco (la casilla y la de debajo) cuando sube la marea
+      const water = this.add.tileSprite(x, y, w, T * 2, 'sea').setOrigin(0).setDepth(6.1).setAlpha(0);
+      const t: Tide = { body, sand, water, x, y, w, phase: (i * TIDE_PHASE_STEP) % TIDE_PERIOD, high: false };
+      body.tide = t;
+      return t;
     });
     for (const m of L.mushrooms) {
       const x = m.c * T;
       const y = (m.r + 1) * T - 6;
       const body = this.staticBody(x, y, T, 6, 'mushroom');
       // origen abajo-centro: así se aplasta contra el suelo al botar
-      body.sprite = this.add.image(x + T / 2, y + 6, 'mushroom').setOrigin(0.5, 1).setDepth(6);
+      body.sprite = this.add.image(x + T / 2, y + 6, L.theme === 'beach' ? 'float' : L.theme === 'swamp' ? 'glowcap' : 'mushroom').setOrigin(0.5, 1).setDepth(6);
+      // respira despacio (al botar sobre ella, el bote lo sustituye)
+      this.tweens.add({ targets: body.sprite, scaleY: 0.93, scaleX: 1.05, duration: 900 + Math.random() * 400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: Math.random() * 600 });
     }
     this.bumpers = L.bumpers.map((b) => {
       const x = b.c * T + T / 2;
       const y = b.r * T + T / 2;
       const body: GameBody = this.matter.add.circle(x, y, 7.5, { isStatic: true, restitution: 0.9, friction: 0, label: 'bumper' });
       body.mat = 'bounds';
-      body.sprite = this.add.image(x, y, 'bumper').setDepth(7);
+      const bk = L.theme === 'beach' ? 'coral' : L.theme === 'swamp' ? 'spore' : 'bumper';
+      body.sprite = this.add.image(x, y, bk).setDepth(7).setData('base', bk);
+      // halo que late para que se vea que "están vivos"
+      const halo = this.add.image(x, y, 'glow').setTint(L.theme === 'beach' ? 0xff9ab0 : L.theme === 'swamp' ? 0xc8a0ff : 0xffd36b).setBlendMode('ADD').setScale(0.5).setAlpha(0.25).setDepth(6.9);
+      this.tweens.add({ targets: halo, alpha: 0.05, scale: 0.8, duration: 900 + Math.random() * 300, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: Math.random() * 500 });
       return body;
     });
     this.saws = L.saws.map((s) => {
       const x = s.c * T + T / 2;
       const y = s.r * T + T / 2;
-      const sp = this.add.sprite(x, y, 'saw', 0).setDepth(7).play('saw-spin');
+      // En la Playa las sierras son cangrejos que pasean por la isla (mismo castigo al tocarlos)
+      const crab = L.theme === 'beach';
+      const frog = L.theme === 'swamp'; // en el Pantano son ranas que saltan de un lado a otro
+      const sp = crab
+        ? this.add.sprite(x, y + 2, 'crab', 0).setDepth(7).play('crab-walk')
+        : frog
+          ? this.add.sprite(x, y + 1, 'frog', 0).setDepth(7)
+          : this.add.sprite(x, y, 'saw', 0).setDepth(7).play('saw-spin');
+      if (frog) {
+        if (s.range) this.frogHop(sp, x - s.range, x + s.range);
+        return sp;
+      }
       if (s.range) {
-        this.add.image(x - s.range, y, bakeTexture(this, `sawrail-${L.theme}-${s.range}`, s.range * 2 + 2, 1, (c) => {
+        if (!crab) this.add.image(x - s.range, y, bakeTexture(this, `sawrail-${L.theme}-${s.range}`, s.range * 2 + 2, 1, (c) => {
           c.fillStyle = rgba(this.P.outline, 0.4);
           for (let rx = 0; rx <= s.range * 2; rx += 3) c.fillRect(rx, 0, 2, 1);
         })).setOrigin(0).setDepth(4);
         sp.x = x - s.range;
-        this.tweens.add({ targets: sp, x: x + s.range, duration: 1800, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
+        this.tweens.add({
+          targets: sp, x: x + s.range, duration: 1800, ease: 'Sine.easeInOut', yoyo: true, repeat: -1,
+          onYoyo: () => crab && sp.setFlipX(true),
+          onRepeat: () => crab && sp.setFlipX(false),
+        });
       }
       return sp;
     });
@@ -907,6 +1042,8 @@ export default class GameScene extends Phaser.Scene {
     this.cupGlow = this.add.image(x, y - 2, 'glow').setTint(0xfff1b0).setBlendMode('ADD').setScale(0.45).setAlpha(0.35).setDepth(5);
     this.tweens.add({ targets: this.cupGlow, alpha: 0.12, scale: 0.6, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     this.flag = this.add.sprite(x + 2, y - 28, 'flag', 0).setOrigin(0, 0).setDepth(7).play('flag-wave');
+    // onda dorada que sale del hoyo de vez en cuando, para localizarlo de lejos
+    this.time.addEvent({ delay: 2600, loop: true, callback: () => this.ringFx(x, y - 1, { r: 11, flat: 0.35, color: 0xffd36b, duration: 800 }) });
     // número del hoyo en la bandera
     this.flagNum = this.add
       .text(x + 8, y - 23, String(this.L.number), {
@@ -953,6 +1090,8 @@ export default class GameScene extends Phaser.Scene {
       wood: { light: 0xffd8a0, bits: [hex('#c8905a'), hex('#8a5a3c')], n: 0.9 },
       mushroom: { light: 0xff9ad0, bits: [hex('#ff9aa2'), 0xffffff, hex('#ffd0e0')], n: 1.4 },
       crumble: { light: 0xffc090, bits: [hex(P.dirtLight), hex(P.dirt), hex(P.stripe)], n: 1.6 },
+      mud: { light: 0xb08a5c, bits: [hex('#7a6248'), hex('#4c3a2a'), hex('#3a2c20')], n: 1.6 },
+      quicksand: { light: 0xe6d99c, bits: [hex('#e6d99c'), hex('#b8a468'), hex('#8e7e48')], n: 1.6 },
       bounds: { light: 0xffffff, bits: [0xffffff, hex('#ffd36b')], n: 0.8 },
     };
     // chispas de los rastros especiales (fuego, estrellas, oro…)
@@ -1093,6 +1232,18 @@ export default class GameScene extends Phaser.Scene {
 
     this.input.on('pointerdown', this.onDown);
     this.input.on('pointermove', this.onMove);
+    // rueda del ratón: zoom in / zoom out para mirar el mapa antes de golpear (al disparar vuelve al zoom normal)
+    this.onWheel = (_p, _over, _dx, dy) => {
+      if (this.state !== 'play') return;
+      const before = this.wheelZoom;
+      this.wheelZoom = Phaser.Math.Clamp(this.wheelZoom * Math.exp(-dy * 0.0015), WHEEL_ZOOM_MIN, WHEEL_ZOOM_MAX);
+      const now = this.time.now;
+      if (this.wheelZoom !== before && now - this.lastZoomTick > 90) {
+        this.lastZoomTick = now;
+        sfx.zoomTick(this.wheelZoom);
+      }
+    };
+    this.input.on('wheel', this.onWheel);
     this.input.on('pointerup', this.onUp);
     this.input.on('pointerupoutside', this.onUp);
     // sin esto, el clic central del navegador activa el autodesplazamiento de la página
@@ -1112,6 +1263,7 @@ export default class GameScene extends Phaser.Scene {
   teardownInput() {
     this.input.off('pointerdown', this.onDown);
     this.input.off('pointermove', this.onMove);
+    this.input.off('wheel', this.onWheel);
     this.input.off('pointerup', this.onUp);
     this.input.off('pointerupoutside', this.onUp);
     this.game.canvas.removeEventListener('mousedown', this.onMiddleDown);
@@ -1323,7 +1475,7 @@ export default class GameScene extends Phaser.Scene {
       this.sparks.explode(4 + Math.round(k * 6), s.x, s.y - 6);
     }
     if (mat === 'mushroom' && impact > 100) sfx.boing();
-    else sfx.land(impact * 2.5);
+    else sfx.land(impact * 2.5, mat);
   }
 
   /** Destello de luz aditivo que se expande y se apaga */
@@ -1354,11 +1506,13 @@ export default class GameScene extends Phaser.Scene {
   bump(bumper: GameBody) {
     const p = this.ball.position;
     const d = new Phaser.Math.Vector2(p.x - bumper.position.x, p.y - bumper.position.y).normalize();
-    this.bumpVel = { x: d.x * 280, y: d.y * 280 }; // se aplica tras el paso de física
+    const bs = bumperSpeed(this.L.theme);
+    this.bumpVel = { x: d.x * bs, y: d.y * bs }; // se aplica tras el paso de física
     const spr = bumper.sprite;
     if (spr) {
-      spr.setTexture('bumper-lit');
-      this.time.delayedCall(140, () => spr.setTexture('bumper'));
+      const base = (spr.getData('base') as string) || 'bumper';
+      spr.setTexture(`${base}-lit`);
+      this.time.delayedCall(140, () => spr.setTexture(base));
       this.tweens.add({ targets: spr, scale: 1.3, duration: 70, yoyo: true });
     }
     this.sparks.explode(8, bumper.position.x, bumper.position.y);
@@ -1380,6 +1534,12 @@ export default class GameScene extends Phaser.Scene {
       m.vx = (nx - m.x) / dt;
       m.x = nx;
       Body.setPosition(m.body, { x: nx + m.w / 2, y: m.y + m.h / 2 }, true);
+    }
+
+    // marea: el banco es sólido mientras está a la vista y deja de serlo cuando sube el agua
+    for (const t of this.tides) {
+      t.high = this.tideHigh(t, this.simTime);
+      t.body.collisionFilter.mask = t.high ? 0 : 0xffffffff;
     }
 
     // plataformas finas: solo sólidas si la bola está por encima
@@ -1427,11 +1587,74 @@ export default class GameScene extends Phaser.Scene {
     this.setVel(vx, vy);
   }
 
+  /** ¿Está alta la marea en este banco en el instante `ms` (reloj de la física)? */
+  tideHigh(t: Tide, ms: number) {
+    return (ms + t.phase) % TIDE_PERIOD >= TIDE_LOW;
+  }
+
+  /** Dibuja los bancos de arena: salen a la vista, parpadean antes de hundirse y quedan cubiertos por el agua */
+  updateTides() {
+    for (const t of this.tides) {
+      const phaseMs = (this.simTime + t.phase) % TIDE_PERIOD;
+      const toHigh = TIDE_LOW - phaseMs; // ms hasta que sube la marea (negativo si ya está alta)
+      const warn = toHigh > 0 && toHigh < TIDE_WARN;
+      t.sand.setVisible(!t.high);
+      t.sand.setAlpha(warn ? (Math.floor(toHigh / 170) % 2 ? 0.45 : 1) : 1);
+      const target = t.high ? 0.9 : warn ? 0.35 * (1 - toHigh / TIDE_WARN) : 0;
+      t.water.setAlpha(t.water.alpha + (target - t.water.alpha) * 0.2);
+      t.water.tilePositionX = this.time.now * 0.012;
+    }
+  }
+
+  /** La rana salta de un extremo a otro de su recorrido, haciendo pausas */
+  frogHop(sp: Phaser.GameObjects.Sprite, xa: number, xb: number) {
+    sp.x = xa;
+    let dir = 1;
+    const hop = () => {
+      if (!sp.active) return;
+      const to = Phaser.Math.Clamp(sp.x + dir * 22, xa, xb);
+      sp.setFrame(1).setFlipX(dir < 0);
+      this.tweens.add({ targets: sp, y: sp.y - 9, duration: 190, yoyo: true, ease: 'Quad.easeOut' });
+      this.tweens.add({
+        targets: sp, x: to, duration: 380, ease: 'Sine.easeInOut',
+        onComplete: () => {
+          sp.setFrame(0);
+          if (to <= xa || to >= xb) dir = -dir;
+          this.time.delayedCall(Phaser.Math.Between(600, 1300), hop);
+        },
+      });
+    };
+    this.time.delayedCall(Phaser.Math.Between(200, 1100), hop);
+  }
+
+  /** El cangrejo que te ha pellizcado muere: se aplasta, suelta unos trocitos y desaparece (hasta que reinicies el hoyo) */
+  killEnemy(sp: Phaser.GameObjects.Sprite) {
+    this.saws = this.saws.filter((s) => s !== sp);
+    this.tweens.killTweensOf(sp);
+    sp.stop();
+    if (sp.texture.key === 'saw') {
+      // sierra: se parte con un estallido de chispas y se desvanece girando
+      sfx.bumper();
+      this.sparks.explode(14, sp.x, sp.y);
+      this.tweens.add({ targets: sp, scale: 1.7, angle: 100, alpha: 0, duration: 320, ease: 'Quad.easeOut', onComplete: () => sp.destroy() });
+      return;
+    }
+    // cangrejo o rana: se aplasta, suelta unos trocitos de su color y desaparece
+    sfx.squash();
+    this.sparks.explode(7, sp.x, sp.y);
+    this.dust.particleTint = sp.texture.key === 'frog' ? 0x5fc04a : 0xff6a4a;
+    this.dust.explode(8, sp.x, sp.y + 3);
+    this.tweens.add({
+      targets: sp, scaleY: 0.25, scaleX: 1.35, y: sp.y + 3, duration: 130, ease: 'Quad.easeOut',
+      onComplete: () => this.tweens.add({ targets: sp, alpha: 0, duration: 450, delay: 150, onComplete: () => sp.destroy() }),
+    });
+  }
+
   startCrumble(cr: Crumble) {
     cr.state = 'shaking';
     sfx.crack();
     const shake = this.tweens.add({ targets: cr.sprite, x: cr.x + 1, duration: 40, yoyo: true, repeat: -1 });
-    this.time.delayedCall(1100, () => {
+    this.time.delayedCall(CRUMBLE_DELAY, () => {
       shake.stop();
       cr.sprite.x = cr.x;
       cr.state = 'fallen';
@@ -1452,7 +1675,7 @@ export default class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: cr.sprite, alpha: 1, duration: 300 });
         cr.state = 'idle';
       };
-      this.time.delayedCall(3200, restore);
+      this.time.delayedCall(CRUMBLE_RESTORE, restore);
     });
   }
 
@@ -1460,6 +1683,7 @@ export default class GameScene extends Phaser.Scene {
     this.resumeFollow();
     const mat = this.currentMat();
     const power = shotPower(v.length());
+    this.wheelZoom = 1; // al disparar, el zoom vuelve al normal
     const dir = v.clone().normalize();
     const sp = power * MAX_SPEED * this.stats.power * MATERIALS[mat].power;
     this.setVel(dir.x * sp + this.carrierVelocity(), dir.y * sp);
@@ -1665,7 +1889,7 @@ export default class GameScene extends Phaser.Scene {
    */
   physicsIdle() {
     return this.state === 'play' && this.ready && !this.respawning && !this.frozen && !this.bumpVel
-      && this.movers.length === 0 && this.crumbles.length === 0;
+      && this.movers.length === 0 && this.crumbles.length === 0 && this.tides.length === 0;
   }
 
   /** Cámara lenta cuando la bola vuela cerca del hoyo (momento "¿entra o no entra?") */
@@ -1700,6 +1924,19 @@ export default class GameScene extends Phaser.Scene {
     this.bgTile.tilePositionY = view.y * 0.6;
     this.updateSky();
     for (const fx of this.waterFx) fx.tilePositionX = this.time.now * 0.007;
+    if (this.sea) this.sea.tilePositionX = this.time.now * 0.006;
+    if (this.fog) {
+      const cam = this.cameras.main;
+      const z = cam.zoom;
+      const mx = cam.width / 2;
+      const my = cam.height / 2;
+      const bp = this.ball.position;
+      this.fogDensity += (fogAt(this.L, bp.y) - this.fogDensity) * 0.04;
+      this.fog.setAlpha(this.fogDensity).setVisible(this.fogDensity > 0.01);
+      // en coordenadas de un objeto fijo a la pantalla: el centro del claro sigue a la bola
+      this.fog.setPosition(((bp.x - cam.worldView.x) * z - mx) / z + mx, ((bp.y - cam.worldView.y) * z - my) / z + my);
+    }
+    this.updateTides();
 
     // la cámara se adelanta hacia donde apuntas
     if (this.state === 'play') {
@@ -1720,18 +1957,19 @@ export default class GameScene extends Phaser.Scene {
       if (w !== this.curWind) {
         this.curWind = w;
         this.bus.emit('wind', w);
+        sfx.wind(w);
+        if (w) sfx.windShift(Math.sign(w));
       }
 
-      // zoom out según la potencia: cuanto más fuerte el golpe, más mapa se ve (se mantiene mientras la bola vuela)
+      // zoom out según la potencia al apuntar: cuanto más fuerte el golpe, más mapa se ve. Al disparar vuelve al zoom normal
       let zt = 1;
-      if (this.aiming && this.aimVec.length() > 6) {
-        zt = 1 - AIM_ZOOM_OUT * shotPower(this.aimVec.length());
-        this.zoomHold = zt;
-      } else if (this.ready) this.zoomHold = 1;
-      else zt = this.zoomHold;
-      const rate = zt < this.zoomK ? 0.12 : 0.05; // se aleja rápido y vuelve despacio
+      if (this.aiming && this.aimVec.length() > 6) zt = 1 - AIM_ZOOM_OUT * shotPower(this.aimVec.length());
+      zt *= this.wheelZoom;
+      // El zoom se asienta siempre en un valor entero (píxeles perfectos): con zoom fraccionario el pixel art sale irregular y los textos, borrosos
+      zt = Math.max(1, Math.round(VIEW.Z * zt)) / VIEW.Z;
+      const rate = zt < this.zoomK ? 0.14 : 0.09; // se aleja rápido y vuelve con soltura
       this.zoomK += (zt - this.zoomK) * Math.min(1, rate * (delta / 16.7));
-      if (Math.abs(this.zoomK - 1) < 0.002 && zt === 1) this.zoomK = 1;
+      if (Math.abs(this.zoomK - zt) < 0.004) this.zoomK = zt; // al llegar, se asienta exacto (zoom entero = píxeles nítidos)
       this.applyZoom();
     }
 
@@ -1781,6 +2019,25 @@ export default class GameScene extends Phaser.Scene {
         this.penalty(cx, cy, 'water');
         return;
       }
+      // arena movediza: si la bola se queda quieta encima, se hunde (+1 golpe)
+      if (this.grounded && this.groundBody?.mat === 'quicksand' && this.relSpeed < 40) {
+        this.sinkTime += delta;
+        if (this.sinkTime > 700 && Math.random() < 0.08) {
+          this.dust.particleTint = 0xe6d99c;
+          this.dust.explode(2, cx, cy + this.ballR);
+          sfx.bubble();
+        }
+        if (this.sinkTime > 1700) {
+          this.sinkTime = 0;
+          this.penalty(cx, cy, 'sink');
+          return;
+        }
+      } else this.sinkTime = 0;
+      // marea alta: si la bola está sobre un banco hundido, cae al agua
+      if (this.tides.some((t) => t.high && cx > t.x - 1 && cx < t.x + t.w + 1 && cy > t.y - this.ballR - 4 && cy < t.y + T * 2)) {
+        this.penalty(cx, cy, 'water');
+        return;
+      }
       // fuera de límites: la bola se ha caído de las islas (solo en hoyos abiertos)
       if (this.L.open && (cy > this.worldH + T || cx < -2 * T || cx > this.worldW + 2 * T)) {
         this.penalty(cx, cy, 'ob');
@@ -1788,6 +2045,7 @@ export default class GameScene extends Phaser.Scene {
       }
       for (const s of this.saws) {
         if (Phaser.Math.Distance.Between(cx, cy, s.x, s.y) < 12) {
+          this.killEnemy(s); // todo enemigo (cangrejo, rana, sierra) pega una vez y desaparece
           this.penalty(cx, cy, 'saw');
           return;
         }
@@ -1806,7 +2064,8 @@ export default class GameScene extends Phaser.Scene {
       this.ready = true;
       this.readyTime = this.time.now;
       const b = this.groundBody;
-      this.safe = { x: cx, y: cy, body: b, dx: b ? cx - b.position.x : 0 };
+      // (un banco de marea no es un sitio seguro: si cae al agua, vuelve a la última isla firme)
+      if (!b?.tide && b?.mat !== 'quicksand') this.safe = { x: cx, y: cy, body: b, dx: b ? cx - b.position.x : 0 };
     } else if (!canShoot && this.ready && !this.aiming) {
       this.ready = false;
     }
@@ -1956,8 +2215,15 @@ export default class GameScene extends Phaser.Scene {
 
     if (kind === 'ob') {
       this.tweens.add({ targets: this.ballSprite, scale: 0.3 * this.ballScale, alpha: 0, duration: 300 });
-      sfx.whoosh();
+      sfx.fall();
       this.bus.emit('toast', { title: '¡Fuera de límites!', text: sub, color: saved ? '#b8ec6a' : '#ffd36b', duration: 1600 });
+    } else if (kind === 'sink') {
+      // arena movediza: la bola se hunde despacio
+      this.dust.particleTint = 0xb8a468;
+      this.dust.explode(14, cx, cy + this.ballR);
+      this.tweens.add({ targets: this.ballSprite, y: cy + 5, alpha: 0, duration: 450 });
+      sfx.sink();
+      this.bus.emit('toast', { title: '¡Te hundes!', text: sub, color: saved ? '#b8ec6a' : '#e6d99c', duration: 1600 });
     } else if (kind === 'water') {
       this.splash.explode(14, cx, cy);
       this.tweens.add({ targets: this.ballSprite, y: cy + 6, alpha: 0, duration: 300 });
@@ -1968,7 +2234,8 @@ export default class GameScene extends Phaser.Scene {
       this.hazardFx.explode(16, cx, cy);
       this.shake(200, 0.012);
       this.cameras.main.flash(90, 239, 77, 94);
-      sfx.hazard();
+      if (this.L.theme === 'beach') sfx.pinch();
+      else sfx.hazard();
       this.bus.emit('toast', { title: '¡Ay!', text: sub, color: saved ? '#b8ec6a' : '#ef4d5e', duration: 1600 });
     }
 

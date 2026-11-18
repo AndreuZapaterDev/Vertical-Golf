@@ -20,8 +20,26 @@ async function start() {
   }
   const game = new Phaser.Game(gameConfig);
   window.__GAME__ = game; // útil para depurar desde la consola
+  crispScaling(game);
   mobileFullscreen();
   capFrameRate(game);
+}
+
+/**
+ * Escalado del lienzo. Si se muestra a su tamaño (o a un múltiplo entero) se deja "pixelado" (nítido); si el navegador tiene que
+ * encogerlo o estirarlo una fracción, el pixelado deja píxeles de distinto tamaño y se ve irregular, así que entonces se suaviza.
+ */
+function crispScaling(game: Phaser.Game) {
+  const apply = () => {
+    const c = game.canvas;
+    if (!c || !c.width) return;
+    const r = c.getBoundingClientRect().width / c.width;
+    const exact = Math.abs(r - Math.round(r)) < 0.03;
+    c.style.imageRendering = exact ? 'pixelated' : 'auto';
+  };
+  apply();
+  game.scale.on('resize', apply);
+  window.addEventListener('resize', apply);
 }
 
 /**

@@ -20,6 +20,10 @@ export default class BootScene extends Phaser.Scene {
     anim('flag-wave', 'flag', [0, 1, 2, 3], 8);
     anim('saw-spin', 'saw', [0, 1, 2, 3], 20);
     anim('tuft-sway', 'tuft', [0, 1], 2);
+    anim('dune-tuft-sway', 'dune-tuft', [0, 1], 2);
+    anim('crab-walk', 'crab', [0, 1], 6);
+    anim('reed-sway', 'reed', [0, 1], 2);
+    anim('frog-idle', 'frog', [0], 1);
     anim('bird-flap', 'bird', [0, 1], 5);
     for (let i = 0; i < 3; i++) anim(`flower${i}-sway`, `flower${i}`, [0, 1], 2);
 

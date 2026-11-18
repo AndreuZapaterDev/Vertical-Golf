@@ -7,7 +7,7 @@
  */
 import { createRequire } from 'node:module';
 import { TILE as T, GRAVITY, MAX_SPEED, BALL_R, STEP, MATERIALS, type MaterialKey } from '../../src/constants';
-import { terrainRects, terrainRamps, thinSolidFor } from '../../src/data/terrainShapes';
+import { terrainRects, terrainRamps, thinSolidFor, TIDE_PERIOD, TIDE_LOW, TIDE_PHASE_STEP, CRUMBLE_DELAY, CRUMBLE_RESTORE, bumperSpeed } from '../../src/data/terrainShapes';
 import { windAt, type ParsedLevel } from '../../src/data/levels';
 
 const require = createRequire(import.meta.url);
@@ -47,6 +47,7 @@ export type Outcome =
 
 interface Mover { body: MBody; baseX: number; x: number; y: number; w: number; h: number; range: number; omega: number; phase: number; vx: number }
 interface Crumble { body: MBody; x: number; y: number; w: number; state: 'idle' | 'shaking' | 'fallen'; at: number }
+interface Tide { body: MBody; x: number; y: number; w: number; phase: number; high: boolean }
 interface SawDef { x: number; y: number; range: number }
 
 const MAX_TIME = 14000; // ms: un golpe que no acaba en este tiempo se da por atascado
@@ -59,6 +60,7 @@ export class LevelSim {
   ball: MBody;
   movers: Mover[] = [];
   crumbles: Crumble[] = [];
+  tides: Tide[] = [];
   thins: MBody[] = [];
   saws: SawDef[];
   cup: { x: number; y: number };
@@ -133,6 +135,11 @@ export class LevelSim {
       body.crumble = c;
       return c;
     });
+    // bancos de marea (igual que GameScene: el ciclo depende del reloj, que aquí incluye el desfase con el que sale cada golpe)
+    this.tides = L.tides.map((td, i) => {
+      const w = td.n * T, x = td.c * T, y = td.r * T;
+      return { body: staticBody(x, y, w, T, 'sand'), x, y, w, phase: (i * TIDE_PHASE_STEP) % TIDE_PERIOD, high: false };
+    });
     for (const m of L.mushrooms) staticBody(m.c * T, (m.r + 1) * T - 6, T, 6, 'mushroom');
     for (const b of L.bumpers) {
       const body = Bodies.circle(b.c * T + T / 2, b.r * T + T / 2, 7.5, { isStatic: true, restitution: 0.9, friction: 0, label: 'bumper' });
@@ -164,7 +171,7 @@ export class LevelSim {
             const p = this.ball.position;
             const dx = p.x - other.position.x, dy = p.y - other.position.y;
             const d = Math.hypot(dx, dy) || 1;
-            this.bumpVel = { x: (dx / d) * 280, y: (dy / d) * 280 };
+            this.bumpVel = { x: (dx / d) * bumperSpeed(this.L.theme), y: (dy / d) * bumperSpeed(this.L.theme) };
           }
           continue;
         }
@@ -213,6 +220,10 @@ export class LevelSim {
       m.x = nx;
       Body.setPosition(m.body, { x: nx + m.w / 2, y: m.y + m.h / 2 }, true);
     }
+    for (const t of this.tides) {
+      t.high = (moverT * 1000 + t.phase) % TIDE_PERIOD >= TIDE_LOW;
+      t.body.collisionFilter.mask = t.high ? 0 : 0xffffffff;
+    }
     for (const b of this.thins) b.collisionFilter.mask = thinSolidFor(this.ball.position.y, BALL_R, b.bounds.min.y) ? 0xffffffff : 0;
     Engine.update(this.engine, ms);
 
@@ -246,7 +257,7 @@ export class LevelSim {
       const cr: Crumble | undefined = gb.crumble;
       if (cr && cr.state === 'idle') {
         cr.state = 'shaking';
-        cr.at = this.simTime + 1100;
+        cr.at = this.simTime + CRUMBLE_DELAY;
       }
     } else {
       vx += windAt(this.L, this.ball.position.y) * dt;
@@ -256,7 +267,7 @@ export class LevelSim {
     for (const cr of this.crumbles) {
       if (cr.state === 'shaking' && this.simTime >= cr.at) {
         cr.state = 'fallen';
-        cr.at = this.simTime + 3200;
+        cr.at = this.simTime + CRUMBLE_RESTORE;
         cr.body.collisionFilter.mask = 0;
       } else if (cr.state === 'fallen' && this.simTime >= cr.at) {
         const p = this.ball.position, r = BALL_R + 1;
@@ -317,7 +328,7 @@ export class LevelSim {
     const under = this.crumbles.find((c) => x > c.x - BALL_R && x < c.x + c.w + BALL_R && Math.abs(from.y + BALL_R - c.y) < 3);
     if (under) {
       under.state = 'shaking';
-      under.at = 600;
+      under.at = 600; // (si el golpe sale de un bloque que ya tiembla, le queda ~0,6 s: se asume que el jugador tardó en apuntar)
     }
 
     let restTime = 0;
@@ -336,6 +347,7 @@ export class LevelSim {
       }
       if (Math.abs(dxCup) < 5 && dyCup > -6 && dyCup < 3 && this.getVel().y > -40) return { kind: 'sink', t };
       if (this.cellAt(cx, cy + 2) === 'W') return { kind: 'water', t, x: cx, y: cy };
+      if (this.tides.some((td) => td.high && cx > td.x - 1 && cx < td.x + td.w + 1 && cy > td.y - BALL_R - 4 && cy < td.y + T * 2)) return { kind: 'water', t, x: cx, y: cy };
       if (this.L.open && (cy > this.worldH + T || cx < -2 * T || cx > this.worldW + 2 * T)) return { kind: 'ob', t, x: cx, y: cy };
       if (!this.L.open && cy > this.worldH + T) return { kind: 'ob', t, x: cx, y: cy };
       for (const s of this.saws) {
