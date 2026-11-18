@@ -2,7 +2,7 @@
 // El canvas real es W*Z × H*Z y las cámaras hacen zoom Z: el pixel art se ve nítido
 // y los textos van a alta resolución.
 /** Versión del juego (se muestra en la pantalla inicial) */
-export const GAME_VERSION = '1.08';
+export const GAME_VERSION = '1.10';
 
 export const W = 240;
 export const H = 426;

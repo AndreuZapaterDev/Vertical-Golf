@@ -9,6 +9,7 @@ import { renderTerrain, renderBlock, cellSolid } from '../gfx/terrain';
 import { terrainRects, terrainRamps, thinSolidFor, TIDE_PERIOD, TIDE_LOW, TIDE_PHASE_STEP, CRUMBLE_DELAY, CRUMBLE_RESTORE, bumperSpeed } from '../data/terrainShapes';
 import { tintFill } from '../gfx/tint';
 import { bakeTexture, rgba, mixHex } from '../gfx/bake';
+import { skyTexture } from '../gfx/textures';
 import { sfx, music, haptic } from '../systems/audio';
 import { applyLook } from '../ui/looks';
 import { progress, type CoinLine } from '../systems/progress';
@@ -264,6 +265,7 @@ export default class GameScene extends Phaser.Scene {
   /** brillos que se deslizan por la superficie del agua */
   waterFx: Phaser.GameObjects.TileSprite[] = [];
   bgTile!: Phaser.GameObjects.TileSprite;
+  skyBase!: Phaser.GameObjects.Image;
   vignette!: Phaser.GameObjects.Image;
   /** mar que rodea las islas en los hoyos abiertos de la Playa (y fango en el Pantano) */
   sea: Phaser.GameObjects.TileSprite | null = null;
@@ -470,7 +472,12 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-10);
-    this.bgTile.setAlpha(0.7); // damero más sutil: el cielo se lee como cielo, no como un tablero
+    this.bgTile.setVisible(false); // el damero ya no se ve: el cielo es un degradado con tramado (ver skyTexture)
+    this.skyBase = this.add
+      .image((W * (z - 1)) / 2, (H * (z - 1)) / 2, skyTexture(this, L.theme))
+      .setOrigin(0)
+      .setScrollFactor(0)
+      .setDepth(-10.2);
     // degradado de altura: cielo más profundo arriba (su opacidad sube con la altura de la cámara, ver updateSky)
     const night = this.P.sky === 'night';
     const deep = mixHex(this.P.bgA, night ? '#0a0e2a' : this.P.sky === 'sunset' ? '#7a4a8a' : '#2a56b8', night ? 0.6 : 0.7);
@@ -604,8 +611,9 @@ export default class GameScene extends Phaser.Scene {
 
     // colinas: al empezar, su base queda escondida tras el suelo.
     // Son tiras que se repiten en horizontal y acompañan a la cámara (los hoyos pueden ser más anchos que la pantalla).
-    for (const [layer, y, f] of [[0, H - 18, 0.35], [1, H + 6, 0.55]]) {
-      const hills = this.add.tileSprite(0, 0, W * 2 + 8, 500, `hills-${th}-${layer}`).setOrigin(0, 80 / 500).setDepth(-9.6 + layer * 0.2);
+    // (la capa 2 son las montañas lejanas: van detrás de las colinas y se mueven más despacio)
+    for (const [layer, y, f] of [[2, H - 50, 0.2], [0, H - 18, 0.35], [1, H + 6, 0.55]]) {
+      const hills = this.add.tileSprite(0, 0, W * 2 + 8, 500, `hills-${th}-${layer}`).setOrigin(0, 80 / 500).setDepth(layer === 2 ? -9.75 : -9.6 + layer * 0.2);
       add(hills, y, f).tile = true;
     }
 
@@ -616,7 +624,7 @@ export default class GameScene extends Phaser.Scene {
       add(this.add.image(52, 0, 'moon').setDepth(-9.8), 150, 0.1);
       const glow = add(this.add.image(52, 0, 'glow').setTint(0x9fb4ff).setBlendMode('ADD').setScale(1.1).setAlpha(0.35).setDepth(-9.85), 150, 0.1);
       this.tweens.add({ targets: glow, alpha: 0.2, scale: 1.25, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      for (let i = 0; i < 46; i++) {
+      for (let i = 0; i < 14; i++) {
         const big = Math.random() < 0.25;
         const s = this.add.image(Phaser.Math.Between(-40, W + 40), 0, big ? 'star-px' : 'px').setDepth(-9.9).setAlpha(Phaser.Math.FloatBetween(0.3, 0.9));
         if (!big) s.setScale(0.5);
@@ -628,7 +636,7 @@ export default class GameScene extends Phaser.Scene {
       add(this.add.image(W * 0.32, 0, 'sun-big').setDepth(-9.8).setAlpha(0.95), H - 120, 0.15);
       this.sunRays(add, W * 0.32, H - 120, 0.15, 0xffb07a, [-35, -5, 25]);
     } else {
-      add(this.add.image(W - 52, 0, 'glow').setTint(0xfff1b0).setBlendMode('ADD').setScale(1.4).setAlpha(0.5).setDepth(-9.85), 130, 0.1);
+      add(this.add.image(W - 52, 0, 'glow').setTint(0xfff1b0).setBlendMode('ADD').setScale(1.4).setAlpha(0.34).setDepth(-9.85), 130, 0.1);
       add(this.add.image(W - 52, 0, 'sun').setDepth(-9.8), 130, 0.1);
       this.sunRays(add, W - 52, 130, 0.1, 0xfff1b0, [22, 42, 62]);
     }
@@ -797,6 +805,7 @@ export default class GameScene extends Phaser.Scene {
     const x0 = (W * VIEW.Z * (1 - 1 / z)) / 2 * 1;
     const y0 = (H * VIEW.Z * (1 - 1 / z)) / 2 * 1;
     this.bgTile.setPosition(x0, y0).setSize(w, h);
+    this.skyBase.setPosition(x0, y0).setDisplaySize(w, h);
     this.skyGrad.setPosition(x0, y0).setDisplaySize(w, h);
     this.vignette.setPosition(x0, y0).setDisplaySize(w, h);
   }
@@ -823,7 +832,7 @@ export default class GameScene extends Phaser.Scene {
 
   buildClouds() {
     this.clouds = [];
-    const n = Math.round((this.worldH / 110) * Math.max(1, this.worldW / W));
+    const n = Math.round((this.worldH / 150) * Math.max(1, this.worldW / W));
     for (let i = 0; i < n; i++) {
       const img = this.add
         .image(Phaser.Math.Between(-30, this.worldW + 30), Phaser.Math.Between(10, this.worldH - 60), `cloud${i % 3}`)
@@ -1994,8 +2003,6 @@ export default class GameScene extends Phaser.Scene {
 
     // parallax del fondo
     const view = this.cameras.main.worldView;
-    this.bgTile.tilePositionX = view.x * 0.6;
-    this.bgTile.tilePositionY = view.y * 0.6;
     this.updateSky();
     for (const fx of this.waterFx) fx.tilePositionX = this.time.now * 0.007;
     if (this.sea) this.sea.tilePositionX = this.time.now * 0.006;

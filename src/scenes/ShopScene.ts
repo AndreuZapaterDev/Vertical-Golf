@@ -957,9 +957,11 @@ export default class ShopScene extends Phaser.Scene {
       machine.add(b);
       bulbs.push({ b, a, col });
     }
+    let lightFrame = 0;
     const lights = this.tweens.addCounter({
       from: 0, to: 1, duration: 2400, repeat: -1,
       onUpdate: (tw) => {
+        if (lightFrame++ & 1) return; // las bombillas se actualizan un fotograma de cada dos (se ven igual de fluidas y cuesta la mitad)
         const t = tw.getValue() ?? 0;
         for (const { b, a } of bulbs) {
           if (!b.active) continue;

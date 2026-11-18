@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { THEMES } from '../constants';
+import { THEMES, W, H } from '../constants';
 import { SKINS } from '../data/upgrades';
 import { canvasTexture } from './terrain';
 
@@ -372,12 +372,14 @@ export function generateTextures(scene: Phaser.Scene) {
     const w = [48, 36, 62][i];
     make(scene, `cloud${i}`, w, 20, (c) =>
       mask(c, w, 20, (x, y) => {
-        if (y > 18) return null;
-        const inside = blobs.some(([bx, by, r]) => Math.hypot(x + 0.5 - bx, y + 0.5 - by) <= r) || (y >= 12 && y <= 18 && x > 5 && x < w - 5);
-        if (!inside) return null;
-        if (y >= 17) return '#dfe8f4';
+        const isIn = (px: number, py: number) =>
+          py >= 0 && py <= 18 && (blobs.some(([bx, by, r]) => Math.hypot(px + 0.5 - bx, py + 0.5 - by) <= r) || (py >= 12 && px > 5 && px < w - 5));
+        if (!isIn(x, y)) return null;
+        if (y >= 17) return '#c3d2e8'; // base de la nube
+        if (y >= 15) return (x + y) % 2 ? '#d6e1f1' : '#dfe8f4'; // vientre en sombra, con tramado
+        if (!isIn(x, y - 1)) return '#ffffff'; // borde superior iluminado
         const hi = blobs.some(([bx, by, r]) => Math.hypot(x + 0.5 - (bx - 2), y + 0.5 - (by - 2)) <= r * 0.65);
-        return hi ? '#ffffff' : '#f2f6fc';
+        return hi ? '#ffffff' : y >= 13 ? '#e6edf8' : '#f2f6fc';
       }, null),
     );
   });
@@ -1220,6 +1222,96 @@ function mix(a: string, b: string, k: number) {
   return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
 }
 
+/**
+ * Cielo de un mundo: degradado vertical a pantalla completa (W×H) con tramado ordenado (dithering 4×4), que es como
+ * se hace un degradado en pixel art. Va de un tono profundo arriba al color del mundo y a un horizonte claro y neblinoso abajo.
+ * Se crea la primera vez que se pide (no para todos los mundos al arrancar).
+ */
+export function skyTexture(scene: Phaser.Scene, themeKey: string): string {
+  const key = `skybase-${themeKey}`;
+  if (scene.textures.exists(key)) return key;
+  const T = THEMES[themeKey as keyof typeof THEMES];
+  const night = T.sky === 'night';
+  const top = night ? mix(T.bgA, '#04060f', 0.82) : T.sky === 'sunset' ? mix(T.bgA, '#5a2f86', 0.62) : mix(T.bgA, '#2457c0', 0.68);
+  const mid = night ? mix(T.bgA, '#04060f', 0.32) : T.bgA;
+  const low = night ? mix(T.bgB, '#8fb8a0', 0.14) : T.sky === 'sunset' ? mix(T.bgB, '#ffe0b0', 0.5) : mix(T.bgB, '#ffffff', 0.5);
+  const hex3 = (c: string) => [(parseInt(c.slice(1), 16) >> 16) & 255, (parseInt(c.slice(1), 16) >> 8) & 255, parseInt(c.slice(1), 16) & 255];
+  const A = hex3(top);
+  const B = hex3(mid);
+  const C = hex3(low);
+  const STEPS = 18; // niveles de color del degradado
+  const ramp: number[][] = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const k = i / STEPS;
+    const [p, q, t] = k < 0.55 ? [A, B, k / 0.55] : [B, C, (k - 0.55) / 0.45];
+    ramp.push([0, 1, 2].map((ch) => Math.round(p[ch] * (1 - t) + q[ch] * t)));
+  }
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const tex = canvasTexture(scene, key, W, H);
+  const ctx = tex.getContext();
+  const img = ctx.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    const level = (y / (H - 1)) * STEPS;
+    const lo = Math.min(STEPS - 1, Math.floor(level));
+    const fr = level - lo;
+    for (let x = 0; x < W; x++) {
+      const thr = (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+      const col = ramp[lo + (fr > thr ? 1 : 0)];
+      const o = (y * W + x) * 4;
+      img.data[o] = col[0];
+      img.data[o + 1] = col[1];
+      img.data[o + 2] = col[2];
+      img.data[o + 3] = 255;
+    }
+  }
+  if (!night) {
+    // bancos de bruma y nubes muy lejanas, suaves y con el borde tramado: el cielo no se queda vacío
+    let sd = 7771;
+    const r2 = () => ((sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296);
+    for (let i = 0; i < 7; i++) {
+      const cx = r2() * W;
+      const cy = H * (0.08 + r2() * 0.72);
+      const rx = 36 + r2() * 60;
+      const ry = 3 + r2() * 6;
+      for (let y = Math.max(0, Math.floor(cy - ry)); y <= Math.min(H - 1, Math.ceil(cy + ry)); y++) {
+        for (let x = Math.max(0, Math.floor(cx - rx)); x <= Math.min(W - 1, Math.ceil(cx + rx)); x++) {
+          const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+          if (d >= 1) continue;
+          if ((1 - d) * 0.9 > (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16) {
+            const o = (y * W + x) * 4;
+            for (let ch = 0; ch < 3; ch++) img.data[o + ch] = Math.min(255, img.data[o + ch] + (255 - img.data[o + ch]) * 0.16);
+          }
+        }
+      }
+    }
+  }
+  if (night) {
+    // estrellas: más y más brillantes arriba; unas pocas más grandes en cruz
+    let seed = 20261;
+    const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+    const setPx = (x: number, y: number, k: number) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return;
+      const o = (y * W + x) * 4;
+      for (let ch = 0; ch < 3; ch++) img.data[o + ch] = Math.round(img.data[o + ch] * (1 - k) + 255 * k);
+    };
+    for (let i = 0; i < 150; i++) {
+      const x = Math.floor(rnd() * W);
+      const y = Math.floor(H * 0.85 * Math.pow(rnd(), 1.5));
+      const k = 0.35 + rnd() * 0.55;
+      setPx(x, y, k);
+      if (i % 12 === 0) {
+        setPx(x - 1, y, k * 0.5);
+        setPx(x + 1, y, k * 0.5);
+        setPx(x, y - 1, k * 0.5);
+        setPx(x, y + 1, k * 0.5);
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  tex.refresh();
+  return key;
+}
+
 function generateSky(scene: Phaser.Scene) {
   // Colinas lejanas (dos capas por mundo) para el parallax del inicio de cada hoyo
   for (const [k, T] of Object.entries(THEMES)) {
@@ -1240,6 +1332,20 @@ function generateSky(scene: Phaser.Scene) {
           );
           rect(c, x, top, 1, h + FILL - top, body);
           px(c, x, top, rim);
+        }
+        // matas y vetas de luz sobre las colinas (textura barata: se pinta una vez)
+        {
+          const topAt = (x: number) => {
+            const a = (x / w) * Math.PI * 2;
+            return Math.round(h * (layer ? 0.42 : 0.3) + Math.sin(a * f1 * 2 + seed) * 12 + Math.sin(a * f2 * 5 + seed * 2) * 6 + Math.sin(a * 11 + seed) * 1.5);
+          };
+          for (let i = 0; i < 70; i++) {
+            const x = (i * 37 + seed * 13) % w;
+            const y = topAt(x) + 2 + ((i * 7) % 11);
+            px(c, x, y, mix(body, '#ffffff', 0.14));
+            px(c, x + 1, y + 1, mix(body, T.outline, 0.12));
+            if (i % 5 === 0) px(c, x + 2, y, mix(body, '#ffffff', 0.08));
+          }
         }
         // neblina: la parte baja se aclara hacia el color del cielo
         const mist = c.createLinearGradient(0, h * 0.5, 0, h + FILL);
@@ -1281,6 +1387,70 @@ function generateSky(scene: Phaser.Scene) {
           }
         }
       });
+    });
+  }
+
+  // Montañas lejanas (tercera capa): picos azulados y neblinosos que dan profundidad al horizonte.
+  // Cada mundo tiene su silueta: cumbres nevadas en la Pradera, acantilados y dunas de arena en la Playa, cerros oscuros en el Pantano.
+  for (const [k, T] of Object.entries(THEMES)) {
+    const w = 240;
+    const h = 80;
+    const FILL = 420;
+    const night = T.sky === 'night';
+    const haze = night ? mix(T.bgA, T.outline, 0.3) : k === 'beach' ? mix(T.bgA, '#f3d9a8', 0.4) : mix(T.bgA, '#6f8fc0', 0.36);
+    make(scene, `hills-${k}-2`, w, h + FILL, (c) => {
+      for (let x = 0; x < w; x++) {
+        const a = (x / w) * Math.PI * 2;
+        // picos: crestas de |seno| (periódicas, para que el fondo se repita sin costuras)
+        const pointy = Math.abs(Math.sin(a * 3 + 1)) * 16 + Math.abs(Math.sin(a * 7 + 2)) * 5 + Math.sin(a * 13) * 1.2;
+        const soft = Math.abs(Math.sin(a * 2 + 0.6)) * 11 + Math.sin(a * 5 + 1) * 4;
+        const ridge = k === 'beach' ? soft : pointy;
+        const top = Math.round(46 - ridge);
+        rect(c, x, top, 1, h + FILL - top, haze);
+        px(c, x, top, mix(haze, '#ffffff', night ? 0.12 : 0.4));
+        // vertiente iluminada a un lado de cada cresta
+        if (!night && ridge > 6) px(c, x, top + 1, mix(haze, '#ffffff', 0.2));
+        // nieve en las cumbres más altas (solo la Pradera)
+        if (k === 'meadow' && ridge > 16.5) rect(c, x, top, 1, Math.min(3, Math.round(ridge - 15.5)), '#f4f8ff');
+      }
+      // detalles lejanos: un molino sobre una cresta de la Pradera y un faro en la costa de la Playa
+      if (k === 'meadow' || k === 'beach') {
+        const dark = mix(haze, T.outline, 0.22);
+        const ridgeTop = (x: number) => {
+          const a = (x / w) * Math.PI * 2;
+          const pointy = Math.abs(Math.sin(a * 3 + 1)) * 16 + Math.abs(Math.sin(a * 7 + 2)) * 5 + Math.sin(a * 13) * 1.2;
+          const soft = Math.abs(Math.sin(a * 2 + 0.6)) * 11 + Math.sin(a * 5 + 1) * 4;
+          return Math.round(46 - (k === 'beach' ? soft : pointy));
+        };
+        if (k === 'meadow') {
+          const mx = 168;
+          const my = ridgeTop(mx);
+          rect(c, mx - 2, my - 8, 5, 8, dark);
+          rect(c, mx - 1, my - 10, 3, 2, dark);
+          for (let i = -5; i <= 5; i++) {
+            px(c, mx + i, my - 9 + i, dark);
+            px(c, mx + i, my - 9 - i, dark);
+          }
+        } else {
+          const lx = 52;
+          const ly = ridgeTop(lx);
+          const tower = mix(haze, '#ffffff', 0.55);
+          const stripe = mix(haze, '#d9806e', 0.7);
+          for (let y = 0; y < 16; y++) rect(c, lx - 2 + (y > 12 ? 0 : 0), ly - 16 + y, 5, 1, Math.floor(y / 4) % 2 ? stripe : tower);
+          rect(c, lx - 3, ly - 19, 7, 3, dark);
+          rect(c, lx - 1, ly - 21, 3, 2, dark);
+          px(c, lx, ly - 22, mix(haze, '#fff6cc', 0.9));
+        }
+      }
+
+      // neblina en la base, para fundirse con las colinas de delante
+      const mist = c.createLinearGradient(0, h * 0.45, 0, h + FILL);
+      mist.addColorStop(0, 'rgba(255,255,255,0)');
+      mist.addColorStop(1, `rgba(255,255,255,${night ? 0.1 : 0.6})`);
+      c.globalCompositeOperation = 'source-atop';
+      c.fillStyle = mist;
+      c.fillRect(0, 0, w, h + FILL);
+      c.globalCompositeOperation = 'source-over';
     });
   }
 
@@ -1327,23 +1497,34 @@ function generateMeadow(scene: Phaser.Scene) {
     mask(c, 22, 28, (x, y) => {
       const cx = x + 0.5;
       const cy = y + 0.5;
-      if (y >= 17 && x >= 9 && x <= 12) return x === 9 ? '#9a6a44' : '#7a4e30'; // tronco
-      const blobs = [[11, 9, 8], [6, 12, 5.5], [16, 12, 5.5], [11, 14, 6]];
+      // tronco con la base ensanchada y dos ramitas
+      if (y >= 17 && x >= 9 && x <= 12) return x === 9 ? '#a8744a' : x === 12 ? '#6a4228' : '#8a5a38';
+      if (y >= 25 && x >= 8 && x <= 13) return x <= 9 ? '#8a5a38' : '#6a4228';
+      if (y === 16 && (x === 8 || x === 13)) return '#7a4e30';
+      const blobs = [[11, 8, 8], [5.5, 12, 5.5], [16.5, 12, 5.5], [11, 14, 6], [8, 5, 4.5], [15, 6, 4.5]];
       if (!blobs.some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r)) return null;
-      if (Math.hypot(cx - 8, cy - 6) < 4) return '#9fe46c';
-      if (cy > 15 || Math.hypot(cx - 15, cy - 13) < 4) return '#3f9a3c';
-      return '#5cc04a';
+      // luz desde arriba a la izquierda: cuatro tonos y motas de hojas sueltas
+      const lit = Math.hypot(cx - 8, cy - 5);
+      const leaf = (x * 7 + y * 13) % 6 === 0;
+      if (lit < 3.2) return '#b8f58a';
+      if (lit < 6 && !leaf) return '#8fe060';
+      if (cy > 16 || Math.hypot(cx - 16, cy - 14) < 3.6) return leaf ? '#348a38' : '#2f7a34';
+      if (cy > 13 || cx > 15) return leaf ? '#4aa845' : '#3f9a3c';
+      return leaf ? '#7ad656' : '#5cc04a';
     }, o);
   });
   // pino 16×30
   make(scene, 'tree-pine', 16, 30, (c) => {
     mask(c, 16, 30, (x, y) => {
-      if (y >= 24 && x >= 7 && x <= 8) return '#7a4e30';
+      if (y >= 24 && x >= 7 && x <= 8) return x === 7 ? '#8a5a38' : '#6a4228';
       if (y >= 24) return null;
       const tier = y < 9 ? y / 9 : y < 17 ? (y - 6) / 11 : (y - 13) / 11;
-      const half = 1 + tier * 6.5;
-      if (Math.abs(x + 0.5 - 8) > half) return null;
-      return x < 8 ? '#4fae58' : '#2f8a46';
+      const half = 1 + tier * 6.5 + (y % 3 === 0 ? 0.8 : 0); // bordes aserrados
+      const dx = x + 0.5 - 8;
+      if (Math.abs(dx) > half) return null;
+      if (y === 8 || y === 16 || y === 23) return '#1f6a3a'; // sombra bajo cada piso
+      if (dx < -half + 1.4) return '#7fd36a'; // borde iluminado
+      return dx < 0 ? ((x + y) % 4 === 0 ? '#5cc060' : '#4fae58') : (x + y) % 4 === 0 ? '#2a7a40' : '#2f8a46';
     }, o);
   });
   // arbusto 14×8
@@ -1354,7 +1535,10 @@ function generateMeadow(scene: Phaser.Scene) {
       if (y > 6) return null;
       const inside = [[4, 5, 3.5], [8, 4, 4], [11, 5.5, 2.8]].some(([bx, by, r]) => Math.hypot(cx - bx, cy - by) <= r);
       if (!inside) return null;
-      return Math.hypot(cx - 6, cy - 3) < 2 ? '#a6ec74' : cy > 5 ? '#3f9a3c' : '#5cc04a';
+      const leaf = (x * 5 + y * 11) % 5 === 0;
+      if (Math.hypot(cx - 5.5, cy - 3) < 1.8) return '#c0f58c';
+      if (cy > 5) return leaf ? '#2f7a34' : '#3f9a3c';
+      return leaf ? '#7ad656' : '#5cc04a';
     }, o),
   );
   // valla blanca 12×8 (se repite)

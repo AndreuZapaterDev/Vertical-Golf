@@ -55,6 +55,7 @@ const QSAND = { hi: rgb('#e6d99c'), base: rgb('#b8a468'), dark: rgb('#8e7e48') }
 const SAND = { hi: rgb('#fff0b0'), base: rgb('#f2d083'), dark: rgb('#d9ad5e') };
 const ICE = { hi: rgb('#ffffff'), light: rgb('#d6f5ff'), base: rgb('#a8e2f5'), dark: rgb('#7cc6ea'), shine: rgb('#e8fbff') };
 const BUMP = [0, 1, 2, 2, 1, 0, 0, 0];
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const lighten = (c: RGBA, k: number): RGBA => [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k, 255].map(Math.round);
 
 /** mezcla dos colores RGBA (t = 0 → a, t = 1 → b) */
@@ -142,6 +143,8 @@ function paint(
     water: rgb(P.water, 225), waterHi: rgb(P.waterHi, 235), waterMid: rgb(P.waterMid, 230),
   };
   C.rockHi = lighten(C.dirtLight, 0.35);
+  // el contorno por encima de la hierba es verde oscuro (más natural que casi negro); el de los lados y el de abajo sigue siendo el del mundo
+  C.topEdge = mixC(C.outline, C.grassLine, 0.7);
   C.deepWater = mixC(rgb(P.water, 235), rgb(P.outline, 235), 0.55);
   C.foam = lighten(rgb(P.waterHi, 240), 0.6);
   C.grassAlt = rgb(P.grassAlt || P.grass);
@@ -192,6 +195,8 @@ function paint(
       }
     }
   }
+  // sin estalactitas ni enredaderas (hoyos cerrados) no hay que buscarlas píxel a píxel: ahorra mucho al cargar el nivel
+  const anyHang = under.some((v) => v) || vine.some((v) => v);
   // franjas de césped cortado: bandas de 6 px que alternan tono (como un fairway)
   const mow = (x: number) => P.mow && Math.floor(x / 6) % 2 === 1;
 
@@ -204,8 +209,16 @@ function paint(
       const m = solid[i];
       if (m) {
         const edge = !E(x - 1, y) || !E(x + 1, y) || !E(x, y - 1) || !E(x, y + 1);
-        if (edge) col = C.outline;
-        else {
+        if (edge) {
+          const grassy = (m === 1 || m === 4 || m === 5) && !P.sandy;
+          if (grassy && !E(x, y - 1)) col = C.topEdge;
+          else if (grassy && (!E(x - 1, y) || !E(x + 1, y))) {
+            // borde lateral: la hierba da la vuelta a la esquina y cae un par de píxeles por el costado
+            let up = 1;
+            while (up < 4 && S(x, y - up - 1)) up++;
+            col = up <= 3 ? C.topEdge : C.outline;
+          } else col = C.outline;
+        } else {
           let dd = 1;
           while (dd < 9 && S(x, y - dd - 1)) dd++;
           const openAbove = dd < 9; // hay aire (o agua) encima a poca distancia
@@ -219,10 +232,11 @@ function paint(
           } else if (m === 1 || m === 4 || m === 5) {
             const gd = 4 + BUMP[x % 8];
             if (openAbove && dd === 1) col = C.grassHi;
-            else if (openAbove && dd <= 3) col = mow(x) ? C.grassAlt : C.grass;
+            else if (openAbove && dd <= 3) col = dd === 2 && hash(x, y, 73) < 0.12 ? C.grassHi : mow(x) ? C.grassAlt : C.grass;
             else if (openAbove && dd < gd) col = C.grassDark;
             else if (openAbove && dd === gd) col = C.grassLine;
             else if (openAbove && dd <= gd + 2) col = C.stripe; // sombra bajo la hierba
+            else if (openAbove && !P.sandy && dd <= gd + 5 + Math.floor(hash(x >> 1, 0, 72) * 3) && hash(x >> 1, 0, 71) < 0.14) col = C.stripe; // raicillas que cuelgan de la hierba
             else if (!S(x - 2, y)) col = C.dirtLight; // borde izquierdo iluminado
             else if (!S(x + 2, y) || !S(x, y + 2)) col = C.stripe; // borde derecho / inferior en sombra
             else {
@@ -243,9 +257,15 @@ function paint(
                 else col = C.dirt;
               }
               // la tierra se oscurece hacia el fondo de la isla (volumen) y junto al borde derecho/inferior (sombra)
+              // la tierra se oscurece hacia el fondo: arena con mezcla suave; tierra con un tramado ordenado muy suave (pixel art)
               if (col === C.dirt || col === C.stripe || col === C.dirtLight) {
-                const k = Math.min(1, Math.max(0, (depth[i] - 7) / 24)) * 0.3;
-                if (k > 0) col = mixC(col, C.outline, k);
+                if (P.sandy) {
+                  const k = Math.min(1, Math.max(0, (depth[i] - 8) / 26)) * 0.16;
+                  if (k > 0) col = mixC(col, C.outline, k);
+                } else {
+                  const kk = Math.min(1, Math.max(0, (depth[i] - 12) / 24));
+                  if (kk > (BAYER4[(y & 3) * 4 + (x & 3)] + 0.5) / 16) col = mixC(col, C.outline, 0.2);
+                }
               }
             }
           } else if (m === 6) {
@@ -294,7 +314,7 @@ function paint(
         if (wet) col = mixC(col, C.outline, 0.2);
       }
       // estalactitas y enredaderas bajo las islas
-      if (!col && !water[i] && y > 0) {
+      if (anyHang && !col && !water[i] && y > 0) {
         for (let k = 1; k <= 14 && y - k + 1 >= 0; k++) {
           const top = (y - k + 1) * w + x; // primer píxel bajo el borde de la isla
           const len = under[top];
