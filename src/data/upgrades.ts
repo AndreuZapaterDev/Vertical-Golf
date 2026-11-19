@@ -28,7 +28,19 @@ export interface Skin {
   /** o = contorno, w = blanco, s = sombra, d = hoyuelos */
   pal: { o: string; w: string; s: string; d: string };
   /** Patrón o efecto visual de la skin */
-  pattern?: 'stripes' | 'dots' | 'gradient' | 'shimmer' | 'prism';
+  pattern?: SkinPattern;
+}
+
+export type SkinPattern =
+  | 'stripes' | 'dots' | 'gradient' | 'shimmer' | 'prism'
+  | 'checker' | 'bands' | 'split' | 'zigzag' | 'swirl' | 'stars' | 'flame' | 'glitch' | 'hex' | 'ember';
+
+/** Mezcla dos colores #rrggbb (t = 0 → a, t = 1 → b) */
+export function blendHex(a: string, b: string, t: number) {
+  const from = Number.parseInt(a.slice(1), 16);
+  const to = Number.parseInt(b.slice(1), 16);
+  const channel = (shift: number) => Math.round(((from >> shift) & 0xff) * (1 - t) + ((to >> shift) & 0xff) * t);
+  return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, '0')).join('')}`;
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -116,8 +128,8 @@ export const UPGRADE_GROUPS: { id: UpgradeGroup; name: string; color: string }[]
   { id: 'help', name: 'Ayudas', color: 'purple' },
 ];
 
-/** Skins (ordenadas por rareza): la clásica viene de serie; el resto salen del gachapón */
-export const SKINS: Skin[] = [
+/** Skins hechas a mano (la clásica viene de serie; el resto salen del gachapón) */
+const BASE_SKINS: Skin[] = [
   { id: 'classic', name: 'Clásica', rarity: 'common', pal: { o: '#3a3550', w: '#ffffff', s: '#d3d8e6', d: '#dfe3ee' } },
   { id: 'peach', name: 'Melocotón', rarity: 'common', pal: { o: '#5a2a30', w: '#ffd8c0', s: '#ff9a7a', d: '#ffe8dc' } },
   { id: 'mint', name: 'Menta', rarity: 'common', pal: { o: '#1d4a3a', w: '#d0ffe8', s: '#5ee0a0', d: '#a0f0c8' } },
@@ -165,6 +177,68 @@ export const SKINS: Skin[] = [
   { id: 'gold', name: 'Dorada', rarity: 'epic', pal: { o: '#7a4a10', w: '#ffe9a0', s: '#f2b43a', d: '#fff6cc' }, pattern: 'shimmer' },
   { id: 'prism', name: 'Prisma', rarity: 'legendary', pal: { o: '#30135b', w: '#8af7ff', s: '#ef71ff', d: '#fff4a8' }, pattern: 'prism' },
 ];
+
+/**
+ * Skins generadas a partir de un color base: [id, nombre, rareza, color, patrón, color del patrón, luz].
+ * La paleta sale del color base (contorno oscuro, luz clara); "luz" es cuánto aclarar (0–1) o un color propio.
+ */
+type SkinRow = [id: string, name: string, rarity: Rarity, base: string, pattern?: SkinPattern, accent?: string, light?: number | string];
+const skinFrom = ([id, name, rarity, base, pattern, accent, light = 0.5]: SkinRow): Skin => ({
+  id, name, rarity, pattern,
+  pal: {
+    o: blendHex(base, '#000000', 0.62),
+    w: typeof light === 'string' ? light : blendHex(base, '#ffffff', light),
+    s: base,
+    d: accent ?? blendHex(base, '#ffffff', 0.8),
+  },
+});
+
+const EXTRA_SKINS: Skin[] = ([
+  // comunes: colores lisos
+  ['teal', 'Verde azulado', 'common', '#1f8f87'], ['cream', 'Crema', 'common', '#f3dfb0'], ['lilac', 'Lila', 'common', '#b89be6'],
+  ['rose', 'Rosa té', 'common', '#e8a0b4'], ['slate', 'Pizarra', 'common', '#5d6b82'], ['rust', 'Óxido', 'common', '#b5532a'],
+  ['moss', 'Musgo', 'common', '#5f8a3a'], ['plum', 'Ciruela', 'common', '#7a3d6e'], ['dawn', 'Alba', 'common', '#ffb866'],
+  ['denim', 'Vaquero', 'common', '#3f6aa8'], ['chalk', 'Tiza', 'common', '#e8e8e0'], ['cocoa', 'Cacao', 'common', '#6a4430'],
+  ['lemon', 'Limón', 'common', '#f0e04a'], ['bubblegum', 'Chicle', 'common', '#ff9ed8'],
+  // raras: dibujos sencillos
+  ['chess', 'Ajedrez', 'rare', '#dcdce4', 'checker', '#2a2a35'], ['picnic', 'Mantel', 'rare', '#ef4d5e', 'checker', '#ffffff'],
+  ['tiles', 'Azulejo', 'rare', '#4a86e0', 'checker', '#ffffff'], ['bee', 'Abeja', 'rare', '#f5c842', 'bands', '#2a2a35'],
+  ['sailor', 'Marinero', 'rare', '#e8eef8', 'bands', '#2a477a'], ['tiger', 'Tigre', 'rare', '#ff9638', 'zigzag', '#3a2210'],
+  ['yinyang', 'Yin y yang', 'rare', '#f4f4f8', 'split', '#1a1a22'], ['twilight', 'Crepúsculo', 'rare', '#ff8a5c', 'split', '#5a4f9a'],
+  ['canyon', 'Cañón', 'rare', '#d9794a', 'zigzag', '#fff0c4'], ['wave', 'Ola', 'rare', '#4ab6bc', 'zigzag', '#ffffff'],
+  ['zig', 'Rayo', 'rare', '#fff36b', 'zigzag', '#3a2a80'], ['lollipop', 'Piruleta', 'rare', '#ff72b6', 'swirl', '#ffffff'],
+  ['cinnamon', 'Canela', 'rare', '#c47a44', 'swirl', '#ffe2c2'], ['whirl', 'Remolino', 'rare', '#5aa8f0', 'swirl', '#ffffff'],
+  ['honeycomb', 'Panal', 'rare', '#f5c842', 'hex', '#b07a10'], ['carbon', 'Carbono', 'rare', '#2b2f3a', 'hex', '#6a7488', 0.3],
+  ['cell', 'Celda', 'rare', '#72d454', 'hex', '#2c6a34'], ['lavarock', 'Roca lávica', 'rare', '#3a2a2a', 'ember', '#ff6a2a', 0.25],
+  ['sandstone', 'Arenisca', 'rare', '#d9a56a', 'ember', '#a8743a'], ['granite', 'Granito', 'rare', '#8a8f9a', 'ember', '#e8eaf0'],
+  ['blossom', 'Cerezo', 'rare', '#ffc2d6', 'dots', '#e8507a'], ['polka', 'Lunares', 'rare', '#ef4d5e', 'dots', '#ffffff'],
+  ['sunset', 'Ocaso', 'rare', '#ef4d5e', 'gradient', undefined, '#ffd36b'], ['deepsea', 'Abismo', 'rare', '#1d3f8a', 'gradient', undefined, '#7fe3f5'],
+  // épicas: efectos que se mueven
+  ['inferno', 'Infierno', 'epic', '#e8302a', 'flame', '#ffd36b'], ['bluefire', 'Fuego azul', 'epic', '#2a6ae0', 'flame', '#9cecfa'],
+  ['ghostfire', 'Fuego fatuo', 'epic', '#3fc88a', 'flame', '#ffffff'], ['solar', 'Solar', 'epic', '#ff9638', 'flame', '#fff36b'],
+  ['glitch', 'Glitch', 'epic', '#2a2f4a', 'glitch', '#ff3ea5', 0.25], ['matrix', 'Matriz', 'epic', '#0f2a18', 'glitch', '#4dff7a', 0.2],
+  ['neon', 'Neón', 'epic', '#1a1030', 'glitch', '#00f0ff', 0.2], ['vapor', 'Vaporwave', 'epic', '#9b6bff', 'glitch', '#ff8ad8'],
+  ['night', 'Noche estrellada', 'epic', '#232a6a', 'stars', '#fff1b0', 0.25], ['nebula', 'Nebulosa', 'epic', '#6a2a8a', 'stars', '#ffb0f0', 0.3],
+  ['cosmos', 'Cosmos', 'epic', '#101030', 'stars', '#9cecfa', 0.2], ['constellation', 'Constelación', 'epic', '#2a4a7a', 'stars', '#ffffff', 0.3],
+  ['hypno', 'Hipnosis', 'epic', '#9b6bff', 'swirl', '#ffffff'], ['spiral', 'Espiral', 'epic', '#3a2a80', 'swirl', '#7fe3f5', 0.35],
+  ['tornado', 'Tornado', 'epic', '#8fa3b8', 'swirl', '#ffffff'], ['candyswirl', 'Remolino dulce', 'epic', '#ff72b6', 'swirl', '#72ddd0'],
+  ['opal', 'Ópalo', 'epic', '#9fd6e8', 'shimmer', undefined, '#fff0ff'], ['pearl', 'Perla', 'epic', '#e3d4ee', 'shimmer', undefined, '#ffffff'],
+  ['silver', 'Plata', 'epic', '#9ba5b5', 'shimmer', undefined, '#ffffff'], ['bronze', 'Bronce', 'epic', '#b4682c', 'shimmer', undefined, '#ffd9a0'],
+  ['tropic', 'Trópico', 'epic', '#ff4aa0', 'gradient', undefined, '#ffe28a'], ['lagoon', 'Laguna', 'epic', '#1f8f87', 'gradient', undefined, '#d6ffe8'],
+  ['sorbet', 'Sorbete', 'epic', '#ff72b6', 'gradient', undefined, '#fff0a8'], ['sunrise', 'Amanecer', 'epic', '#6a4bdb', 'gradient', undefined, '#ffd8b0'],
+  // legendarias
+  ['rainbow', 'Arcoíris', 'legendary', '#ef4d5e', 'prism', '#72d454', '#ffd36b'], ['holo', 'Holograma', 'legendary', '#5a8bff', 'prism', '#fff4a8', '#bffcff'],
+  ['iris', 'Iris', 'legendary', '#b47aff', 'prism', '#7fe3f5', '#ffd1f2'], ['diamond', 'Diamante', 'legendary', '#7fe3f5', 'shimmer', undefined, '#ffffff'],
+  ['phoenix', 'Fénix', 'legendary', '#ff3a2a', 'flame', '#fff36b'], ['dragon', 'Dragón', 'legendary', '#2a8a4a', 'flame', '#ffd36b', 0.4],
+  ['void', 'Vacío', 'legendary', '#08060f', 'stars', '#b47aff', 0.18], ['singularity', 'Singularidad', 'legendary', '#0a0818', 'swirl', '#b47aff', 0.18],
+  ['cyber', 'Cíber', 'legendary', '#00c8ff', 'glitch', '#ff3ea5'], ['royalgold', 'Oro real', 'legendary', '#f2b43a', 'shimmer', undefined, '#fff6cc'],
+  ['emperor', 'Emperador', 'legendary', '#7a2ad0', 'swirl', '#ffd36b', 0.4], ['celestial', 'Celestial', 'legendary', '#8ad0ff', 'stars', '#ffffff', 0.6],
+] as SkinRow[]).map(skinFrom);
+
+const RARITY_ORDER_LOCAL: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+
+/** Todas las skins ordenadas por rareza (sin cambiar el orden dentro de cada una) */
+export const SKINS: Skin[] = [...BASE_SKINS, ...EXTRA_SKINS].sort((a, b) => RARITY_ORDER_LOCAL.indexOf(a.rarity) - RARITY_ORDER_LOCAL.indexOf(b.rarity));
 
 /**
  * Al terminar un hoyo:

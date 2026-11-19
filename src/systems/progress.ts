@@ -1,5 +1,5 @@
 import { UPGRADES, SKINS, ECONOMY, upgradeDef, type UpgradeId } from '../data/upgrades';
-import { TRAILS, DEFAULT_TRAIL, BALL_TYPES, DEFAULT_BALL, PRIZES, RARITIES, GACHA, type Prize, type PrizeKind, type Rarity } from '../data/cosmetics';
+import { TRAILS, DEFAULT_TRAIL, AURAS, DEFAULT_AURA, BALL_TYPES, DEFAULT_BALL, PRIZES, RARITIES, GACHA, type Prize, type PrizeKind, type Rarity } from '../data/cosmetics';
 import { LEVELS } from '../data/levels';
 import { WORLDS } from '../data/worlds';
 
@@ -49,6 +49,9 @@ interface SaveState {
   tokens: number;
   trails: string[];
   trail: string;
+  /** auras (la luz de la bola) */
+  auras: string[];
+  aura: string;
   skins: string[];
   skin: string;
   /** tipos de pelota (física) */
@@ -75,7 +78,7 @@ const BACKUP = `${KEY}:backup`;
 const DEFAULT_SETTINGS: Settings = { music: 0.6, sfx: 1, vibration: true, shake: true, look: 'normal' };
 
 const fresh = (): SaveState => ({
-  levels: {}, coins: 0, upgrades: {}, activeUpgradeLevels: {}, tokens: 0, trails: [DEFAULT_TRAIL], trail: DEFAULT_TRAIL, skins: ['classic'], skin: 'classic', balls: [DEFAULT_BALL], ball: DEFAULT_BALL, settings: { ...DEFAULT_SETTINGS },
+  levels: {}, coins: 0, upgrades: {}, activeUpgradeLevels: {}, tokens: 0, trails: [DEFAULT_TRAIL], trail: DEFAULT_TRAIL, auras: [DEFAULT_AURA], aura: DEFAULT_AURA, skins: ['classic'], skin: 'classic', balls: [DEFAULT_BALL], ball: DEFAULT_BALL, settings: { ...DEFAULT_SETTINGS },
 });
 
 const num = (v: unknown, def: number, min = 0, max = Infinity) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def);
@@ -118,6 +121,8 @@ function sanitize(p: any): SaveState {
   s.tokens = Math.round(num(p.tokens, 0, 0));
   if (Array.isArray(p.trails)) s.trails = [...new Set<string>([DEFAULT_TRAIL, ...p.trails.filter((id: unknown) => TRAILS.some((t) => t.id === id))])];
   if (s.trails.includes(p.trail)) s.trail = p.trail;
+  if (Array.isArray(p.auras)) s.auras = [...new Set<string>([DEFAULT_AURA, ...p.auras.filter((id: unknown) => AURAS.some((a) => a.id === id))])];
+  if (s.auras.includes(p.aura)) s.aura = p.aura;
   if (Array.isArray(p.skins)) s.skins = [...new Set<string>(['classic', ...p.skins.filter((id: unknown) => SKINS.some((k) => k.id === id))])];
   if (s.skins.includes(p.skin)) s.skin = p.skin;
   if (Array.isArray(p.balls)) {
@@ -181,7 +186,7 @@ function save() {
 }
 
 /** Lista guardada de lo conseguido de cada categoría */
-const ownedList = (kind: PrizeKind): string[] => (kind === 'skin' ? state.skins : kind === 'ball' ? state.balls : state.trails);
+const ownedList = (kind: PrizeKind): string[] => (kind === 'skin' ? state.skins : kind === 'ball' ? state.balls : kind === 'aura' ? state.auras : state.trails);
 
 type SettingsListener = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 const listeners = new Set<SettingsListener>();
@@ -375,10 +380,24 @@ export const progress = {
 
   /** Tienes este premio? / equípalo (sea del tipo que sea) */
   owns(kind: PrizeKind, id: string): boolean {
-    return kind === 'skin' ? this.ownsSkin(id) : kind === 'ball' ? this.ownsBall(id) : this.ownsTrail(id);
+    return kind === 'skin' ? this.ownsSkin(id) : kind === 'ball' ? this.ownsBall(id) : kind === 'aura' ? this.ownsAura(id) : this.ownsTrail(id);
   },
   equip(kind: PrizeKind, id: string): boolean {
-    return kind === 'skin' ? this.equipSkin(id) : kind === 'ball' ? this.equipBall(id) : this.equipTrail(id);
+    return kind === 'skin' ? this.equipSkin(id) : kind === 'ball' ? this.equipBall(id) : kind === 'aura' ? this.equipAura(id) : this.equipTrail(id);
+  },
+
+  // ---- auras
+  get aura(): string {
+    return this.ownsAura(state.aura) ? state.aura : DEFAULT_AURA;
+  },
+  ownsAura(id: string): boolean {
+    return dev || state.auras.includes(id);
+  },
+  equipAura(id: string): boolean {
+    if (!this.ownsAura(id)) return false;
+    state.aura = id;
+    save();
+    return true;
   },
 
   // ---- rastros

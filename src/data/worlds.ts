@@ -1,6 +1,7 @@
 import { MEADOW } from './worlds/meadow';
 import { BEACH } from './worlds/beach';
 import { SWAMP } from './worlds/swamp';
+import { JUNGLE } from './worlds/jungle';
 import type { ThemeKey } from '../constants';
 import type { LevelDef } from './levels';
 
@@ -59,9 +60,8 @@ export const WORLDS: WorldDef[] = [
     tagline: 'Lianas, ruinas y tótems',
     theme: 'jungle',
     button: 'green',
-    preview: ['.................', '.................', '#################', '#################'],
-    levels: [],
-    comingSoon: true,
+    preview: ['.................', '..MM..........rr', '#################', '#################'],
+    levels: JUNGLE,
   },
   {
     id: 'candy',

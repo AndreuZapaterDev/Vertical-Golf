@@ -186,7 +186,7 @@ function paint(
           let free = 0;
           while (free < len && y + 1 + free < h && !solid[i + (1 + free) * w] && !water[i + (1 + free) * w]) free++;
           if (free >= len) under[i + w] = len;
-        } else if (hash(x, y, 43) < (P.swampy ? 0.1 : 0.04) && !under[i + w] && !P.sandy) {
+        } else if (hash(x, y, 43) < (P.swampy ? 0.1 : P.jungly ? 0.28 : 0.04) && !under[i + w] && !P.sandy) {
           const len = 6 + Math.floor(hash(x, y, 44) * 8);
           let free = 0;
           while (free < len && y + 1 + free < h && !solid[i + (1 + free) * w] && !water[i + (1 + free) * w]) free++;

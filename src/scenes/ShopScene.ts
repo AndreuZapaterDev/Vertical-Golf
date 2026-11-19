@@ -4,7 +4,7 @@ import { Background } from '../gfx/background';
 import { bakeTexture } from '../gfx/bake';
 import { tintFill } from '../gfx/tint';
 import { UPGRADES, UPGRADE_GROUPS, SKINS, type Upgrade, type UpgradeGroup, type UpgradeId } from '../data/upgrades';
-import { TRAILS, BALL_TYPES, RARITIES, RARITY_ORDER, PRIZES, GACHA, KIND_NAMES, trailById, ballTypeById, type Rarity, type Trail, type Prize, type PrizeKind, type BallType } from '../data/cosmetics';
+import { TRAILS, AURAS, BALL_TYPES, RARITIES, RARITY_ORDER, PRIZES, GACHA, KIND_NAMES, trailById, ballTypeById, auraById, type Rarity, type Trail, type Aura, type Prize, type PrizeKind, type BallType } from '../data/cosmetics';
 import { hex } from '../constants';
 import { progress } from '../systems/progress';
 import { sfx } from '../systems/audio';
@@ -397,15 +397,15 @@ export default class ShopScene extends Phaser.Scene {
   // (comparten las casillas y la ficha de detalle)
 
   itemList(kind: PrizeKind): { id: string; name: string; rarity: Rarity }[] {
-    return kind === 'ball' ? BALL_TYPES : kind === 'skin' ? SKINS : TRAILS;
+    return kind === 'ball' ? BALL_TYPES : kind === 'skin' ? SKINS : kind === 'aura' ? AURAS : TRAILS;
   }
 
   owns(kind: PrizeKind, id: string) {
-    return kind === 'ball' ? progress.ownsBall(id) : kind === 'skin' ? progress.ownsSkin(id) : progress.ownsTrail(id);
+    return progress.owns(kind, id);
   }
 
   equippedOf(kind: PrizeKind) {
-    return kind === 'ball' ? progress.ball : kind === 'skin' ? progress.skin : progress.trail;
+    return kind === 'ball' ? progress.ball : kind === 'skin' ? progress.skin : kind === 'aura' ? progress.aura : progress.trail;
   }
 
   ownedCount(kind: PrizeKind) {
@@ -424,9 +424,49 @@ export default class ShopScene extends Phaser.Scene {
       const ball = this.add.sprite(ox, oy - 2 * k, `ball-${id}`, 0).setScale(2.2 * k);
       c.add(ball);
       this.spinBall(ball);
+    } else if (kind === 'aura') {
+      this.auraPreview(c, auraById(id), k, ox, oy - 2 * k);
     } else {
       c.add(this.trailPreview(trailById(id), 0, 0, 30 * k).setPosition(ox, oy - 2 * k));
     }
+  }
+
+  /** Bola con su aura animada: luz que late, ondas, satélites, chispas o cambio de color según el estilo */
+  auraPreview(c: Phaser.GameObjects.Container, A: Aura, k: number, ox: number, oy: number) {
+    const col = A.id === 'auto' ? 0xffffff : A.color;
+    const col2 = A.color2 ?? col;
+    const glow = this.add.image(ox, oy, 'glow').setBlendMode('ADD').setTint(col).setScale(1.05 * k * (A.size ?? 1)).setAlpha(0.85);
+    c.add(glow);
+    this.tweens.add({ targets: glow, alpha: 0.5, scale: glow.scale * (A.style === 'pulse' ? 1.3 : 1.1), duration: 750, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    if (A.style === 'rainbow') {
+      this.tweens.addCounter({ from: 0, to: 1, duration: 2400, repeat: -1, onUpdate: (tw) => glow.setTint(Phaser.Display.Color.HSLToColor(tw.getValue() ?? 0, 0.9, 0.7).color) });
+    }
+    if (A.style === 'ring' || A.style === 'halo') {
+      const ring = this.add.circle(ox, oy, 8 * k).setStrokeStyle(1, col, 0.9);
+      c.add(ring);
+      this.tweens.add({ targets: ring, scale: { from: 0.8, to: 1.7 }, alpha: { from: 1, to: 0 }, duration: 1300, repeat: -1 });
+      if (A.style === 'halo') c.add(this.add.circle(ox, oy, 9 * k).setStrokeStyle(1, col2, 0.7));
+    }
+    if (A.style === 'orbit' || A.style === 'halo' || A.style === 'rainbow') {
+      const n = A.style === 'orbit' ? 3 : 2;
+      const orbit = this.add.container(ox, oy);
+      for (let i = 0; i < n; i++) {
+        const a = (i * Math.PI * 2) / n;
+        orbit.add(this.add.rectangle(Math.cos(a) * 11 * k, Math.sin(a) * 11 * k, 2, 2, i % 2 ? col2 : col));
+      }
+      c.add(orbit);
+      this.tweens.add({ targets: orbit, angle: 360, duration: 1800, repeat: -1 });
+    }
+    if (A.style === 'sparks' || A.style === 'flame') {
+      for (let i = 0; i < 4; i++) {
+        const dot = this.add.rectangle(ox + (i - 1.5) * 4 * k, oy + 6 * k, 2, 2, i % 2 ? col2 : col).setAlpha(0);
+        c.add(dot);
+        this.tweens.add({ targets: dot, y: oy - 12 * k, alpha: { from: 1, to: 0 }, duration: 900, repeat: -1, delay: i * 220 });
+      }
+    }
+    const ball = this.add.sprite(ox, oy, `ball-${progress.skin}`, 0).setScale(1.5 * k);
+    c.add(ball);
+    this.spinBall(ball);
   }
 
   /** Rasgos de un objeto para las etiquetas de la ficha: estadísticas de la pelota, efectos del rastro, estilo de la skin */
@@ -447,9 +487,18 @@ export default class ShopScene extends Phaser.Scene {
       if (b.magnet && b.magnet !== 1) out.push({ text: `Imán ×${b.magnet}`, color: good });
       if (!out.length) out.push({ text: 'Sin cambios', color: neutral });
     } else if (kind === 'skin') {
-      const names = { stripes: 'Rayas', dots: 'Puntos', gradient: 'Degradado', shimmer: 'Destellos', prism: 'Prisma' };
+      const names = {
+        stripes: 'Rayas', dots: 'Puntos', gradient: 'Degradado', shimmer: 'Destellos', prism: 'Prisma', checker: 'Cuadros', bands: 'Franjas',
+        split: 'Dos mitades', zigzag: 'Zigzag', swirl: 'Espiral', stars: 'Estrellas', flame: 'Llamas', glitch: 'Glitch', hex: 'Panal', ember: 'Moteado',
+      };
       const s = SKINS.find((x) => x.id === id);
       out.push({ text: s?.pattern ? names[s.pattern] : 'Color liso', color: neutral });
+      if (s && (s.rarity === 'epic' || s.rarity === 'legendary')) out.push({ text: 'Destello', color: good });
+    } else if (kind === 'aura') {
+      const names = { soft: 'Luz suave', pulse: 'Late', ring: 'Ondas', orbit: 'Satélites', sparks: 'Chispas', flame: 'Llamas', rainbow: 'Arcoíris', halo: 'Halo' };
+      const a = auraById(id);
+      out.push({ text: a.id === 'auto' ? 'Color del rastro' : names[a.style], color: a.style === 'soft' ? neutral : good });
+      if (a.color2 && a.style !== 'rainbow') out.push({ text: '2 colores', color: neutral });
     } else {
       const t = trailById(id);
       if (t.rainbow) out.push({ text: 'Arcoíris', color: good });
@@ -596,11 +645,12 @@ export default class ShopScene extends Phaser.Scene {
       { kind: 'ball', text: 'Pelotas', color: 'green' },
       { kind: 'skin', text: 'Skins', color: 'gold' },
       { kind: 'trail', text: 'Rastros', color: 'blue' },
+      { kind: 'aura', text: 'Auras', color: 'purple' },
     ];
     sub.forEach((t, i) => {
-      const x = W / 2 + (i - 1) * 74;
+      const x = W / 2 + (i - 1.5) * 56;
       const b = makeButton(this, x, 92, {
-        color: t.color, w: 70, h: 18, text: `${t.text} ${this.ownedCount(t.kind)}/${this.itemList(t.kind).length}`, size: 8,
+        color: t.color, w: 54, h: 18, text: `${t.text} ${this.ownedCount(t.kind)}/${this.itemList(t.kind).length}`, size: 6,
         onClick: () => {
           if (this.colTab === t.kind) return;
           this.colTab = t.kind;
@@ -630,7 +680,7 @@ export default class ShopScene extends Phaser.Scene {
       const x = 36 + (i % 5) * 42;
       const y = rowY(Math.floor(i / 5));
       this.slotCell(x, y, 36, 40, {
-        rarity: it.rarity, owned: this.owns(kind, it.id), equipped: this.equippedOf(kind) === it.id, ghost: kind !== 'trail',
+        rarity: it.rarity, owned: this.owns(kind, it.id), equipped: this.equippedOf(kind) === it.id, ghost: kind === 'ball' || kind === 'skin',
         interactive: true, delay: i * 22,
         draw: (c) => this.drawItem(c, kind, it.id, 1, kind === 'ball'),
         onPick: () => {
@@ -659,11 +709,12 @@ export default class ShopScene extends Phaser.Scene {
       { kind: 'ball', text: 'Pelotas', color: 'green' },
       { kind: 'skin', text: 'Skins', color: 'gold' },
       { kind: 'trail', text: 'Rastros', color: 'blue' },
+      { kind: 'aura', text: 'Auras', color: 'purple' },
     ];
     sub.forEach((t, i) => {
-      const x = W / 2 + (i - 1) * 74;
+      const x = W / 2 + (i - 1.5) * 56;
       const b = makeButton(this, x, 94, {
-        color: t.color, w: 70, h: 18, text: `${t.text} ${this.ownedCount(t.kind)}`, size: 8,
+        color: t.color, w: 54, h: 18, text: `${t.text} ${this.ownedCount(t.kind)}`, size: 7,
         onClick: () => {
           if (this.equipKind === t.kind) return;
           this.equipKind = t.kind;
@@ -1151,6 +1202,11 @@ export default class ShopScene extends Phaser.Scene {
   /** Dibujo pequeño de un premio: pelota (con tu skin y a su tamaño), skin o rastro */
   prizeIcon(p: Prize, x: number, y: number) {
     if (p.kind === 'trail') return this.trailPreview(trailById(p.id), 0, 0, 26).setPosition(x, y);
+    if (p.kind === 'aura') {
+      const c = this.add.container(x, y);
+      this.auraPreview(c, auraById(p.id), 0.8, 0, 0);
+      return c;
+    }
     const k = p.kind === 'ball' ? ballScale(ballTypeById(p.id)) : 1;
     const s = this.add.sprite(x, y, `ball-${p.kind === 'skin' ? p.id : progress.skin}`, 0).setScale(1.8 * k);
     this.spinBall(s);
@@ -1349,10 +1405,14 @@ export default class ShopScene extends Phaser.Scene {
       });
     }
 
-    let shown: Phaser.GameObjects.Graphics | Phaser.GameObjects.Sprite;
+    let shown: Phaser.GameObjects.Graphics | Phaser.GameObjects.Sprite | Phaser.GameObjects.Container;
     let size = 2.6;
     if (prize.kind === 'trail') {
       shown = this.trailPreview(trailById(prize.id), 0, 0, 30).setPosition(cx, cy).setDepth(57);
+    } else if (prize.kind === 'aura') {
+      shown = this.add.container(cx, cy).setDepth(57);
+      this.auraPreview(shown, auraById(prize.id), 1, 0, 0);
+      size = 3.2;
     } else {
       // una pelota se enseña con la skin que llevas puesta, a su tamaño
       const ball = this.add.sprite(cx, cy, `ball-${prize.kind === 'skin' ? prize.id : progress.skin}`, 0).setDepth(57);

@@ -92,6 +92,72 @@ export const TRAILS: Trail[] = byRarity([
 ]);
 
 /**
+ * Aura: la luz que rodea a la bola mientras juegas.
+ *   color / color2  colores de la luz (color2 se usa en chispas, llamas, órbitas y halos)
+ *   style           soft: luz fija · pulse: late · ring: ondas · orbit: puntos que giran · sparks: chispas
+ *                   flame: llamas hacia arriba · rainbow: cambia de color · halo: aro doble con puntos
+ *   size            tamaño de la luz (1 = normal)
+ * 'auto' es la de siempre: toma el color del rastro.
+ */
+export type AuraStyle = 'soft' | 'pulse' | 'ring' | 'orbit' | 'sparks' | 'flame' | 'rainbow' | 'halo';
+export interface Aura {
+  id: string;
+  name: string;
+  rarity: Rarity;
+  color: number;
+  color2?: number;
+  style: AuraStyle;
+  size?: number;
+}
+
+type AuraRow = [id: string, name: string, rarity: Rarity, color: number, style: AuraStyle, color2?: number, size?: number];
+const auraFrom = ([id, name, rarity, color, style, color2, size]: AuraRow): Aura => ({ id, name, rarity, color, style, color2, size });
+
+export const AURAS: Aura[] = byRarity(([
+  ['auto', 'Del rastro', 'common', 0xffffff, 'soft'],
+  // comunes: luz suave de un color
+  ['white', 'Blanca', 'common', 0xffffff, 'soft'], ['warm', 'Cálida', 'common', 0xffd9a0, 'soft'], ['red', 'Roja', 'common', 0xef4d5e, 'soft'],
+  ['blue', 'Azul', 'common', 0x5aa8f0, 'soft'], ['green', 'Verde', 'common', 0x72d454, 'soft'], ['yellow', 'Amarilla', 'common', 0xffd36b, 'soft'],
+  ['pink', 'Rosa', 'common', 0xff72b6, 'soft'], ['violet', 'Violeta', 'common', 0xb47aff, 'soft'], ['orange', 'Naranja', 'common', 0xff8a5c, 'soft'],
+  ['cyan', 'Cian', 'common', 0x7fe3f5, 'soft'], ['teal', 'Verde azulado', 'common', 0x45c7b1, 'soft'], ['lime', 'Lima', 'common', 0xc4e84a, 'soft'],
+  ['magenta', 'Magenta', 'common', 0xd946a8, 'soft'], ['gold', 'Dorada', 'common', 0xf2b43a, 'soft'], ['mint', 'Menta', 'common', 0x9ff0c8, 'soft'],
+  ['sky', 'Celeste', 'common', 0x9cd4ff, 'soft'], ['coral', 'Coral', 'common', 0xff8068, 'soft'], ['indigo', 'Índigo', 'common', 0x6a78e8, 'soft'],
+  ['lilac', 'Lila', 'common', 0xc8aef0, 'soft'], ['peach', 'Melocotón', 'common', 0xffb89a, 'soft'], ['amber', 'Ámbar', 'common', 0xffb020, 'soft'],
+  ['scarlet', 'Escarlata', 'common', 0xd8283c, 'soft'], ['azure', 'Azur', 'common', 0x2a8aff, 'soft'], ['jade', 'Jade', 'common', 0x2fb078, 'soft'],
+  ['plum', 'Ciruela', 'common', 0x9a4aa8, 'soft'], ['aqua', 'Aqua', 'common', 0x4ad8d0, 'soft'], ['lemon', 'Limón', 'common', 0xf0f060, 'soft'],
+  ['rose', 'Rosa té', 'common', 0xf0a0b8, 'soft'], ['ice', 'Hielo', 'common', 0xd8f4ff, 'soft'], ['sun', 'Sol', 'common', 0xffe890, 'soft', undefined, 1.2],
+  // raras: laten o sueltan ondas
+  ['p-red', 'Latido rojo', 'rare', 0xff4a5a, 'pulse'], ['p-blue', 'Latido azul', 'rare', 0x4a9aff, 'pulse'], ['p-green', 'Latido verde', 'rare', 0x5ee08a, 'pulse'],
+  ['p-gold', 'Latido dorado', 'rare', 0xffc83a, 'pulse', undefined, 1.2], ['p-violet', 'Latido violeta', 'rare', 0xa070ff, 'pulse'],
+  ['p-pink', 'Latido rosa', 'rare', 0xff6ab0, 'pulse'], ['p-cyan', 'Latido cian', 'rare', 0x5ee8f8, 'pulse'], ['p-orange', 'Latido naranja', 'rare', 0xff8a3a, 'pulse'],
+  ['p-white', 'Latido blanco', 'rare', 0xffffff, 'pulse', undefined, 1.25], ['p-lime', 'Latido lima', 'rare', 0xb8f040, 'pulse'],
+  ['p-teal', 'Latido turquesa', 'rare', 0x45c7b1, 'pulse'],
+  ['r-red', 'Ondas rojas', 'rare', 0xef4d5e, 'ring'], ['r-blue', 'Ondas azules', 'rare', 0x5aa8f0, 'ring'], ['r-green', 'Ondas verdes', 'rare', 0x72d454, 'ring'],
+  ['r-gold', 'Ondas doradas', 'rare', 0xffd36b, 'ring'], ['r-violet', 'Ondas violetas', 'rare', 0xb47aff, 'ring'], ['r-pink', 'Ondas rosas', 'rare', 0xff72b6, 'ring'],
+  ['r-cyan', 'Ondas cian', 'rare', 0x7fe3f5, 'ring'], ['r-orange', 'Ondas naranjas', 'rare', 0xff8a5c, 'ring'], ['r-white', 'Ondas blancas', 'rare', 0xffffff, 'ring'],
+  ['r-teal', 'Ondas turquesa', 'rare', 0x45c7b1, 'ring'], ['r-lime', 'Ondas lima', 'rare', 0xc4e84a, 'ring'], ['r-magenta', 'Ondas magenta', 'rare', 0xd946a8, 'ring'],
+  ['r-indigo', 'Ondas índigo', 'rare', 0x6a78e8, 'ring'], ['r-sun', 'Ondas solares', 'rare', 0xffe890, 'ring', undefined, 1.2],
+  // épicas: puntos que giran, chispas y llamas (con dos colores)
+  ['o-gold', 'Satélites dorados', 'epic', 0xffd36b, 'orbit', 0xfff6cc], ['o-ice', 'Satélites de hielo', 'epic', 0x7fe3f5, 'orbit', 0xffffff],
+  ['o-rose', 'Satélites rosas', 'epic', 0xff72b6, 'orbit', 0xffd8f6], ['o-jade', 'Satélites de jade', 'epic', 0x45c7b1, 'orbit', 0xc4ffe8],
+  ['o-violet', 'Satélites violetas', 'epic', 0xb47aff, 'orbit', 0x7fe3f5], ['o-fire', 'Satélites de fuego', 'epic', 0xff8a5c, 'orbit', 0xffe890],
+  ['s-star', 'Polvo de estrellas', 'epic', 0xffffff, 'sparks', 0xfff1b0], ['s-fairy', 'Hada', 'epic', 0xff9ade, 'sparks', 0xc8faff],
+  ['s-spring', 'Primavera', 'epic', 0x9be06a, 'sparks', 0xffd8f6], ['s-electric', 'Electricidad', 'epic', 0x7fb8ff, 'sparks', 0xfff36b],
+  ['s-ember', 'Brasas', 'epic', 0xff6a2a, 'sparks', 0xffd36b],
+  ['f-fire', 'Llamas', 'epic', 0xff6a2a, 'flame', 0xffd36b], ['f-blue', 'Llamas azules', 'epic', 0x3a8aff, 'flame', 0x9cecfa],
+  ['f-ghost', 'Llamas fantasma', 'epic', 0x72ffc0, 'flame', 0xffffff], ['f-violet', 'Llamas violetas', 'epic', 0xa070ff, 'flame', 0xff9ade],
+  ['f-sun', 'Llamas solares', 'epic', 0xffb020, 'flame', 0xfff6cc, 1.2],
+  // legendarias
+  ['rainbow', 'Arcoíris', 'legendary', 0xffffff, 'rainbow'], ['rainbow-big', 'Arcoíris radiante', 'legendary', 0xffffff, 'rainbow', undefined, 1.4],
+  ['halo-gold', 'Halo dorado', 'legendary', 0xffd36b, 'halo', 0xffffff, 1.2], ['halo-ice', 'Halo helado', 'legendary', 0x7fe3f5, 'halo', 0xffffff, 1.2],
+  ['halo-void', 'Halo del vacío', 'legendary', 0x8a4aff, 'halo', 0xff72b6, 1.2], ['halo-sun', 'Halo solar', 'legendary', 0xff8a3a, 'halo', 0xfff36b, 1.3],
+  ['halo-jade', 'Halo de jade', 'legendary', 0x45e0a0, 'halo', 0xe8fff4, 1.2], ['halo-blood', 'Halo carmesí', 'legendary', 0xe0283c, 'halo', 0xffb0b8, 1.2],
+] as AuraRow[]).map(auraFrom));
+
+export const DEFAULT_AURA = 'auto';
+export const auraById = (id: string) => AURAS.find((a) => a.id === id) || AURAS[0];
+
+/**
  * Tipo de pelota: cambia cómo se comporta (la skin y el rastro son aparte y valen para cualquier tipo).
  * Todos los campos son multiplicadores sobre la bola normal salvo radius y bounce.
  *   radius   radio en px (la normal mide BALL_R = 5)
@@ -135,10 +201,10 @@ export const DEFAULT_BALL = 'standard';
 export const trailById = (id: string) => TRAILS.find((t) => t.id === id) || TRAILS[0];
 export const ballTypeById = (id: string) => BALL_TYPES.find((b) => b.id === id) || BALL_TYPES[0];
 
-export type PrizeKind = 'skin' | 'ball' | 'trail';
+export type PrizeKind = 'skin' | 'ball' | 'trail' | 'aura';
 
 /** Nombre de cada categoría para la UI */
-export const KIND_NAMES: Record<PrizeKind, string> = { ball: 'Pelota', skin: 'Skin', trail: 'Rastro' };
+export const KIND_NAMES: Record<PrizeKind, string> = { ball: 'Pelota', skin: 'Skin', trail: 'Rastro', aura: 'Aura' };
 
 /** Premio posible del gachapón */
 export interface Prize {
@@ -153,6 +219,7 @@ export const PRIZES: Prize[] = byRarity([
   ...BALL_TYPES.filter((b) => b.id !== DEFAULT_BALL).map((b): Prize => ({ kind: 'ball', id: b.id, name: b.name, rarity: b.rarity })),
   ...SKINS.filter((s) => s.id !== DEFAULT_SKIN).map((s): Prize => ({ kind: 'skin', id: s.id, name: s.name, rarity: s.rarity })),
   ...TRAILS.filter((t) => t.id !== DEFAULT_TRAIL).map((t): Prize => ({ kind: 'trail', id: t.id, name: t.name, rarity: t.rarity })),
+  ...AURAS.filter((a) => a.id !== DEFAULT_AURA).map((a): Prize => ({ kind: 'aura', id: a.id, name: a.name, rarity: a.rarity })),
 ]);
 
 /** El gachapón nunca da repetidos: solo sortea entre lo que te falta */

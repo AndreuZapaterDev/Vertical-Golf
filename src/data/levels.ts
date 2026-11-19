@@ -153,6 +153,9 @@ export const MECHANICS = {
   tide: { title: 'Marea', text: 'Los bancos de arena emergen y se hunden con la marea. Si suben las olas con la bola encima, +1 golpe: aterriza cuando el banco esté a la vista.', color: '#7fe3f5' },
   dune: { title: 'Dunas', text: 'Las dunas son de arena: frenan la bola y desde ellas golpeas más flojo. Pasa por encima con fuerza.', color: '#ffd36b' },
   crab: { title: 'Cangrejos', text: 'Un cangrejo pasea por la isla. Si lo tocas, +1 golpe y el cangrejo desaparece; mejor pasar por encima.', color: '#ff8a5c' },
+  leaf: { title: 'Hojas gigantes', text: 'Rebotan mucho y desde ellas golpeas más fuerte. ¡Úsalas para saltar alto!', color: '#8ae05a' },
+  totem: { title: 'Tótems', text: 'Los tótems te lanzan disparado, como un pinball. Aprovéchalos o esquívalos.', color: '#ffb060' },
+  plant: { title: 'Plantas carnívoras', text: 'Si te acercas (mira el círculo rojo), se estiran y te comen la bola: +1 golpe. Pasa lejos, o rápido, antes de que te alcancen.', color: '#e0405a' },
   wind: { title: 'Brisa', text: 'El viento empuja la bola mientras vuela. Mira las flechas.', color: '#7fe3f5' },
 } satisfies Record<string, Mechanic>;
 

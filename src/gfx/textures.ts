@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { THEMES, W, H } from '../constants';
-import { SKINS } from '../data/upgrades';
+import { SKINS, blendHex, type Skin } from '../data/upgrades';
 import { canvasTexture } from './terrain';
 
 /**
@@ -52,13 +52,6 @@ const rect = (c: Ctx, x: number, y: number, w: number, h: number, col: string) =
   c.fillStyle = col;
   c.fillRect(x, y, w, h);
 };
-
-function blendHex(a: string, b: string, t: number) {
-  const from = Number.parseInt(a.slice(1), 16);
-  const to = Number.parseInt(b.slice(1), 16);
-  const channel = (shift: number) => Math.round(((from >> shift) & 0xff) * (1 - t) + ((to >> shift) & 0xff) * t);
-  return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, '0')).join('')}`;
-}
 
 function mask(c: Ctx, w: number, h: number, fn: PixelFn, outline?: string | null) {
   const grid: ReturnType<PixelFn>[] = new Array(w * h);
@@ -147,33 +140,57 @@ export function generateTextures(scene: Phaser.Scene) {
     for (const [x, y] of dimples[f]) px(c, x, y, '#dfe3ee');
   });
   // una textura por bola comprable (misma forma, otra paleta o efecto)
+  // luz desde arriba a la izquierda: 0 brillo, 1 luz, 2 medio, 3 sombra (cada píxel de la esfera)
+  const shadeAt = (x: number, y: number) => {
+    const dx = (x - 4.5) / 4.5;
+    const dy = (y - 4.5) / 4.5;
+    const lum = (-0.55 * dx - 0.75 * dy) * 0.7 + Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy)) * 0.5;
+    return lum > 0.78 ? 0 : lum > 0.34 ? 1 : lum > 0 ? 2 : 3;
+  };
+  const patterns: Record<string, (u: number, y: number, f: number, P: Skin['pal']) => string | null> = {
+    checker: (u, y, _f, P) => (((u >> 1) + (y >> 1)) % 2 ? P.d : null),
+    bands: (_u, y, _f, P) => (y % 4 === 2 ? P.d : null),
+    split: (u, _y, _f, P) => (u % 8 < 4 ? P.d : null),
+    zigzag: (u, y, _f, P) => ((u + [0, 1, 2, 1][y % 4] * 2) % 4 === 0 ? P.d : null),
+    swirl: (u, y, _f, P) => ((u + y) % 4 === 0 ? P.d : (u + y) % 4 === 2 ? blendHex(P.d, P.s, 0.55) : null),
+    stars: (u, y, f, P) => (['2,3', '6,2', '4,6', '7,5', '1,7', '5,0'].includes(`${u % 8},${y}`) ? (f % 2 ? '#ffffff' : P.d) : null),
+    flame: (u, y, f, P) => (y >= 9 - [2, 3, 1, 3, 2, 1, 3, 2][u % 8] - (f % 2) ? (y >= 8 ? '#ffffff' : P.d) : null),
+    glitch: (u, y, f, P) => (y === 3 + (f % 2) * 3 ? '#ffffff' : y % 3 === 0 && (u + y) % 5 < 2 ? P.d : null),
+    hex: (u, y, _f, P) => (y % 2 === 0 && (u + (y >> 1) * 2) % 4 === 0 ? P.d : null),
+    ember: (u, y, _f, P) => ((u * 7 + y * 13) % 11 < 2 ? P.d : null),
+    stripes: (u, _y, _f, P) => (u % 4 === 1 ? P.d : null),
+  };
+  const glints = [[7, 2], [8, 5], [6, 8], [2, 6]];
   for (const skin of SKINS) {
     const P = skin.pal;
+    const flat = !skin.pattern || ['gradient', 'shimmer', 'prism'].includes(skin.pattern);
     makeFrames(scene, `ball-${skin.id}`, 10, 10, 4, (c, f) => {
-      bitmap(c, 0, 0, base, { o: P.o, w: P.w, h: '#ffffff', s: P.s });
-      const inside = (x: number, y: number) => base[y][x] === 'w' || base[y][x] === 's';
-      if (skin.pattern === 'stripes') {
-        for (const x of [3, 6]) for (let y = 1; y < 9; y++) if (inside(x, y)) px(c, x, y, P.d);
-      } else if (skin.pattern === 'dots') {
-        // estrellitas que giran con la bola
-        for (const [x, y] of [[2, 3], [6, 2], [4, 6], [7, 5], [3, 8]]) {
-          const xx = 1 + ((x + f * 2) % 8);
-          if (inside(xx, y)) px(c, xx, y, (x + y) % 3 ? P.d : '#ffd36b');
+      const inside = (x: number, y: number) => base[y][x] === 'w' || base[y][x] === 's' || base[y][x] === 'h';
+      bitmap(c, 0, 0, base, { o: P.o });
+      for (let y = 0; y < 10; y++) {
+        for (let x = 0; x < 10; x++) {
+          if (!inside(x, y)) continue;
+          const lvl = shadeAt(x, y);
+          const u = x + f * 2; // el dibujo se desplaza con los fotogramas: parece que rueda
+          let ink: string | null = null;
+          let col = [blendHex(P.w, '#ffffff', 0.7), P.w, blendHex(P.w, P.s, 0.55), P.s][lvl];
+          if (skin.pattern === 'gradient') ink = blendHex(P.w, P.s, (x - 1) / 7);
+          else if (skin.pattern === 'shimmer') ink = blendHex(P.w, P.s, ((x + y + f * 3) % 10) / 9);
+          else if (skin.pattern === 'prism') ink = [P.w, P.s, P.d, '#76f5e8', '#ff65c4'][Math.floor((x + y * 2 + f * 3) / 2) % 5];
+          else if (skin.pattern === 'dots') {
+            const dot = [[2, 3], [6, 2], [4, 6], [7, 5], [3, 8]].find(([dx, dy]) => 1 + ((dx + f * 2) % 8) === x && dy === y);
+            if (dot) ink = (dot[0] + dot[1]) % 3 ? P.d : '#ffd36b';
+          } else if (skin.pattern) ink = patterns[skin.pattern](u, y, f, P);
+          if (ink) col = lvl === 0 ? blendHex(ink, '#ffffff', 0.45) : lvl === 1 ? ink : blendHex(ink, P.o, lvl === 2 ? 0.18 : 0.38);
+          px(c, x, y, col);
         }
-      } else {
-        for (let y = 1; y < 9; y++) {
-          for (let x = 1; x < 9; x++) {
-            if (!inside(x, y)) continue;
-            if (skin.pattern === 'gradient') px(c, x, y, blendHex(P.w, P.s, (x - 1) / 7));
-            else if (skin.pattern === 'shimmer') px(c, x, y, blendHex(P.w, P.s, ((x + y + f * 3) % 10) / 9));
-            else if (skin.pattern === 'prism') {
-              const colors = [P.w, P.s, P.d, '#76f5e8', '#ff65c4'];
-              const band = Math.floor((x + y * 2 + f * 3) / 2) % colors.length;
-              px(c, x, y, colors[band]);
-            }
-          }
-        }
-        for (const [x, y] of dimples[f]) px(c, x, y, P.d);
+      }
+      if (flat) for (const [x, y] of dimples[f]) px(c, x, y, blendHex(P.d, P.s, shadeAt(x, y) / 4));
+      // destello viajero: solo en las skins épicas y legendarias
+      if (skin.rarity === 'epic' || skin.rarity === 'legendary') {
+        const [gx, gy] = glints[f];
+        if (inside(gx, gy)) px(c, gx, gy, '#ffffff');
+        if (skin.rarity === 'legendary' && inside(gx - 1, gy)) px(c, gx - 1, gy, blendHex(P.d, '#ffffff', 0.6));
       }
     });
   }
@@ -846,6 +863,36 @@ export function generateTextures(scene: Phaser.Scene) {
       if (Math.abs(cx - 5) > half) return null;
       return (x + y) % 3 === 0 ? '#2f8a38' : '#4aa83a';
     }, '#123a16'));
+  // Selva: hoja gigante (sustituye a la seta), tótem (sustituye al bumper) y planta carnívora (sustituye a las sierras; dos frames: cerrada y abierta)
+  make(scene, 'jleaf', 12, 7, (c) =>
+    bitmap(c, 0, 0, [
+      '...oooooo...',
+      '..oghhgggo..',
+      '.oghggdggdo.',
+      'oggggdddgggo',
+      '.oddgggggddo',
+      '..oodddddoo.',
+      '....oooo....',
+    ], { o: '#0e3a1a', g: '#3fb84a', h: '#b4f070', d: '#23803a' }));
+  for (const [key, ring, core] of [['totem', '#c0763a', '#ffe0a0'], ['totem-lit', '#ffb060', '#ffffff']] as const) {
+    make(scene, key, 17, 17, (c) =>
+      mask(c, 17, 17, (x, y) => {
+        const dx = x + 0.5 - 8.5;
+        const dy = y + 0.5 - 8.5;
+        const r = Math.hypot(dx, dy);
+        if (r > 7.6) return null;
+        if (r > 5.4) return dx + dy < -3 ? '#e8a868' : (x * 5 + y * 7) % 6 === 0 ? '#7a3e1c' : ring;
+        if (r > 3.2) return (x + y) % 3 === 0 ? '#7a3e1c' : '#f0c060';
+        return core;
+      }, '#3a1a0a'));
+  }
+  makeFrames(scene, 'plant', 12, 10, 2, (c, f) => {
+    const stem = ['..oooggooo..', '....ogg.....', '..ogggggg...', '.oggggggggo.'];
+    bitmap(c, 0, 0, (f
+      ? ['orro....orro', 'orrro..orrro', 'owrrroorrrwo', 'owowrrrrowow', '.orrrwwrrro.', '..orrrrrro..']
+      : ['...oooooo...', '..orrrrrro..', '.orrrhrrrro.', 'orrrrrrrrrro', 'owowowowowow', '.orrrrrrrro.']
+    ).concat(stem), { o: '#3a0e18', r: '#e0405a', h: '#ff9ab0', w: '#ffffff', g: '#3fb84a' });
+  });
   make(scene, 'temple', 28, 24, (c) =>
     mask(c, 28, 24, (x, y) => {
       const cx = x + 0.5;
@@ -1186,9 +1233,11 @@ export function generateTextures(scene: Phaser.Scene) {
     rect(c, 0, 0, 12, 12, '#f6e4b2');
     rect(c, 0, 0, 12, 1, '#fff5d2');
     rect(c, 0, 1, 12, 1, '#f9ebc2');
+    rect(c, 0, 9, 12, 1, '#ecd6a2'); // transición a arena húmeda
     rect(c, 0, 10, 12, 2, '#dcc18c');
     rect(c, 0, 11, 12, 1, '#a9854f');
     for (const [x, y] of [[2, 4], [7, 3], [4, 7], [9, 7], [10, 5]]) px(c, x, y, '#ead09a');
+    for (const [x, y] of [[1, 2], [8, 6], [5, 9]]) px(c, x, y, '#fffbe8'); // brillos de arena mojada
     rect(c, 1, 5, 3, 1, '#e8cd92');
     rect(c, 6, 8, 4, 1, '#e8cd92');
   });
@@ -1320,7 +1369,7 @@ function generateSky(scene: Phaser.Scene) {
       const w = 240;
       const h = 80;
       // la pradera tiene colinas verdes; de noche, siluetas oscuras para que no parezcan dibujos de línea
-      const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : k === 'beach' ? (layer ? '#e6c98e' : '#f2deb2') : k === 'swamp' ? (layer ? '#3c5a47' : '#587a64') : T.bgB;
+      const base = k === 'meadow' ? (layer ? '#8fd08a' : '#a8dcb0') : k === 'beach' ? (layer ? '#e6c98e' : '#f2deb2') : k === 'swamp' ? (layer ? '#3c5a47' : '#587a64') : k === 'jungle' ? (layer ? '#2f8a52' : '#4fae78') : T.bgB;
       const body = mix(base, T.outline, dark);
       const rim = T.sky === 'night' ? mix(T.bgA, T.outline, 0.1) : mix(base, '#ffffff', 0.3);
       const FILL = 420; // la tierra de las colinas se prolonga hacia abajo y se funde con la neblina

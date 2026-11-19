@@ -104,12 +104,14 @@ export interface Theme {
   cloudTint?: number;
   cloudAlpha?: number;
   ambient: 'leaf' | 'petal' | 'firefly';
-  decor: 'day' | 'night' | 'meadow' | 'beach' | 'swamp';
+  decor: 'day' | 'night' | 'meadow' | 'beach' | 'swamp' | 'jungle';
   mow?: boolean;
   hillsDark?: [number, number];
   /** terreno de arena: textura con ondulaciones y sin hierba colgante (Playa) */
   /** pantano: algas en el agua y más musgo colgando bajo las islas */
   swampy?: boolean;
+  /** selva: muchas lianas largas colgando bajo las islas */
+  jungly?: boolean;
   sandy?: boolean;
   /** sin contorno oscuro donde la tierra toca el agua (pozas que se funden con la arena) */
   softWater?: boolean;
@@ -174,12 +176,13 @@ export const THEMES: Record<ThemeKey, Theme> = {
     sky: 'sunset', ambient: 'leaf', decor: 'day',
   },
   jungle: {
-    bgA: '#2e5a38', bgB: '#264e30',
+    bgA: '#2c7d58', bgB: '#25704e',
     outline: '#0e2412',
-    dirt: '#5a4630', stripe: '#473624', dirtLight: '#76603e',
-    grassHi: '#8ae05a', grass: '#4aa83a', grassDark: '#2f7a2c', grassLine: '#123a16',
-    water: '#3a8a6a', waterHi: '#8ae0b8', waterMid: '#58b890',
-    sky: 'day', ambient: 'firefly', decor: 'night',
+    dirt: '#8a4a2a', stripe: '#6e3a20', dirtLight: '#a85f38', // tierra rojiza (laterita)
+    grassHi: '#b4f070', grass: '#3fb84a', grassDark: '#23803a', grassLine: '#0e3a1a',
+    roughHi: '#2fa04a', rough: '#1f7a3a', roughDark: '#145a2a',
+    water: '#2aa890', waterHi: '#9af0d0', waterMid: '#4cc8a8',
+    sky: 'day', cloudTint: 0xd8f0d0, cloudAlpha: 0.5, ambient: 'leaf', decor: 'jungle', jungly: true, hillsDark: [0.2, 0.34],
   },
   temple: {
     bgA: '#d8b888', bgB: '#c8a878',
